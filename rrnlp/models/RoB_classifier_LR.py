@@ -40,6 +40,9 @@ class AbsRoBBot:
         
         with open(os.path.join(weights_path, f'{doi}_bias_prob_clf.pck'), 'rb') as f:
             self.clf = pickle.load(f)
+            # this parameter value seems to have changed over time, so we force update it.
+            if self.clf.get_params()['loss'] == 'log':
+                self.clf.set_params(loss='log_loss')
 
         self.vec = HashingVectorizer(ngram_range=(1, 3), stop_words='english')
 
