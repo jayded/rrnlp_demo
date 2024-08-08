@@ -22,6 +22,21 @@ from .models import (
     get_device,
 )
 
+class ReviewBot:
+    task_loaders = {
+        'search_bot': None,
+        'screener_bot': None,
+    }
+
+    def __init__(self, tasks=None, trial_reader=None, device='auto'):
+        if tasks is None:
+            tasks = ReviewBot.task_loaders.keys()
+        else:
+            assert all([task in ReviewBot.task_loaders for task in tasks])
+
+        self.models = {task: ReviewBot.task_loaders[task](device=get_device(device)) for task in tasks}
+
+
 
 class TrialReader:
     task_loaders = {
