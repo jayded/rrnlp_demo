@@ -28,6 +28,7 @@ class TrialReader:
         "rct_bot": RCT_classifier.AbsRCTBot,
         "pico_span_bot": PICO_tagger.PICOBot,
         "punchline_bot": ev_inf_classifier.EvInfBot,
+        "ico_ev_bot": ICOev_extractor.ICOBot,
         "bias_ab_bot": RoB_classifier_LR.AbsRoBBot,
         "sample_size_bot": sample_size_extractor.MLPSampleSizeClassifier,
         "study_design_bot": study_design_classifier.AbsStudyDesignBot
