@@ -11,9 +11,17 @@ import warnings
 
 import rrnlp
 
-from rrnlp.models import PICO_tagger, ev_inf_classifier, \
-                        sample_size_extractor, RoB_classifier_LR, \
-                        RCT_classifier, study_design_classifier, get_device \
+from .models import (
+    RCT_classifier,
+    PICO_tagger,
+    ev_inf_classifier,
+    ICOev_extractor,
+    sample_size_extractor,
+    RoB_classifier_LR,
+    study_design_classifier,
+    get_device,
+)
+
 
 class TrialReader:
     task_loaders = {

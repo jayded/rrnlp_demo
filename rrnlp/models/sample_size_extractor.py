@@ -23,10 +23,9 @@ from torch import nn
 
 import rrnlp
 from rrnlp.models.util import index_numbers
-from rrnlp.models import encoder 
+from rrnlp.models import encoder, weights_path, files_needed
 
-weights_path = rrnlp.models.weights_path
-doi = rrnlp.models.files_needed['sample_size_extractor']['zenodo']
+doi = files_needed['sample_size_extractor']['zenodo']
 word_embeddings_path = os.path.join(weights_path, f"{doi}_PubMed-w2v.bin") # note that this is not DOI'ed - but fetched from the gensim source
 MLP_weights_path     = os.path.join(weights_path, f"{doi}_sample_size_weights.pt")
 

@@ -29,10 +29,9 @@ import torch
 from transformers import BertForSequenceClassification
 
 import rrnlp
-from rrnlp.models import encoder, get_device
+from rrnlp.models import encoder, get_device, weights_path, files_needed
 
-weights_path = rrnlp.models.weights_path
-doi = rrnlp.models.files_needed['RoB_classifier']['zenodo']
+doi = files_needed['RoB_classifier']['zenodo']
 
 # These are the paths to the classifier (clf) and (custom; top-k layer)
 # encoder weights for the RoB model.
