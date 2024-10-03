@@ -62,7 +62,7 @@ class TrialReader:
         "ico_ev_bot": ICOev_extractor.ICOBot,
         "bias_ab_bot": RoB_classifier_LR.AbsRoBBot,
         "sample_size_bot": sample_size_extractor.MLPSampleSizeClassifier,
-        "study_design_bot": study_design_classifier.AbsStudyDesignBot
+        "study_design_bot": study_design_classifier.AbsStudyDesignBot,
         'numerical_extraction_bot': NumericalExtractionBot.get_numerical_extractor_bot,
     }
 
