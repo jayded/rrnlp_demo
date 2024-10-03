@@ -20,12 +20,17 @@ from .models import (
     RoB_classifier_LR,
     study_design_classifier,
     get_device,
+    SearchBot,
+    ScreenerBot,
+    NumericalExtractionBot,
+    MultiSummaryGenerationBot,
 )
 
 class ReviewBot:
     task_loaders = {
-        'search_bot': None,
-        'screener_bot': None,
+        'search_bot': SearchBot.get_search_bot,
+        'screener_bot': ScreenerBot.load_screener,
+        'mds_summary_bot': MultiSummaryGenerationBot.load_mds_summary_bot,
     }
 
     def __init__(self, tasks=None, trial_reader=None, device='auto'):
@@ -36,7 +41,18 @@ class ReviewBot:
 
         self.models = {task: ReviewBot.task_loaders[task](device=get_device(device)) for task in tasks}
 
+    def generate_search(topic: str) -> str:
+        pass
 
+    def execute_search(topic: str=None, query: str=None) -> List[Dict[str, str]]:
+        assert topic is None != query is None
+
+    def apply_screener(pubmed_results: List[Dict[str, str]], threshold=None):
+        # TODO do we want any auto screener?
+        pass
+
+    def apply_trial_reader(pubmed_results: List[Dict[str, str]]):
+        pass
 
 class TrialReader:
     task_loaders = {
@@ -47,6 +63,7 @@ class TrialReader:
         "bias_ab_bot": RoB_classifier_LR.AbsRoBBot,
         "sample_size_bot": sample_size_extractor.MLPSampleSizeClassifier,
         "study_design_bot": study_design_classifier.AbsStudyDesignBot
+        'numerical_extraction_bot': NumericalExtractionBot.get_numerical_extractor_bot,
     }
 
 

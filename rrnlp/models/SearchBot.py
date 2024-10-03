@@ -21,13 +21,20 @@ from rrnlp.models import get_device
 
 #weights_path = rrnlp.models.weights_path
 # TODO
-#weights = '/media/more_data/jay/overflow/ei_demo/base_query_model/Review_title/checkpoint_epoch_0006'
-weights = '/media/more_data/jay/overflow/ei_demo/RRnlp/ckpt6_merged'
+#weights = '/media/more_data/jay/overflow/ei_demo/base_query_model_stripped/Review_title'
+weights = '/media/more_data/jay/overflow/ei_demo/base_query_model/Review_title/checkpoint_epoch_0006'
+#weights = '/media/more_data/jay/overflow/ei_demo/RRnlp/ckpt6_merged'
 
 #weights = '/media/more_data/jay/overflow/ei_demo/base_query_model/Review_title/checkpoint_epoch_0006'
 
+def get_search_bot(weights=weights, tokenizer='mistralai/Mistral-7B-Instruct-v0.2', device='auto'):
+    return PubmedQueryGeneratorBot(
+        weights=weights,
+        tokenizer=tokenizer,
+        device=device,
+    )
 
-def get_topic_to_pubmed_converter(weights, base_tokenizer, device) -> AutoModelForCausalLM:
+def get_topic_to_pubmed_converter(weights, tokenizer, device) -> Tuple[AutoModelForCausalLM, AutoTokenizer]:
     ''' 
     Returns the 'punchline' extractor, which seeks out sentences that seem to convey
     main findings. 
@@ -35,24 +42,25 @@ def get_topic_to_pubmed_converter(weights, base_tokenizer, device) -> AutoModelF
     device = get_device(device=device)
     #dtype = torch.float32
     #print('loading to', device)
-    tokenizer = AutoTokenizer.from_pretrained(base_tokenizer)
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer)
     os.makedirs('./offload', exist_ok=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        'mistralai/Mistral-7B-Instruct-v0.2',
-        #is_trainable=False,
+    #model = AutoModelForCausalLM.from_pretrained(
+    #    'mistralai/Mistral-7B-Instruct-v0.2',
+    #    #is_trainable=False,
+    #    device_map='auto',
+    #    offload_folder='./offload',
+    #    low_cpu_mem_usage=True,
+    #)
+    #model = model.load_adapter(
+    #    weights,
+    #    #offload_folder=tempfile.TemporaryDirectory().name,
+    #)
+    model = AutoPeftModelForCausalLM.from_pretrained(
+        weights,
         device_map='auto',
-        offload_folder='./offload',
+        offload_folder=tempfile.TemporaryDirectory().name,
         low_cpu_mem_usage=True,
     )
-    #model = base_model.load_adapter(
-    #    weights,
-    #    offload_folder=tempfile.TemporaryDirectory().name,
-    #)
-    #model = AutoPeftModelForCausalLM.from_pretrained(
-    #    weights,
-    #    device_map='auto',
-    #    offload_folder=tempfile.TemporaryDirectory().name,
-    #)
     #model = AutoPeftModelForCausalLM.from_pretrained(
     #    weights,
     #    is_trainable=False,
@@ -72,13 +80,13 @@ class PubmedQueryGeneratorBot:
     
     def __init__(
         self,
-        weights=weights,
-        base_tokenizer='mistralai/Mistral-7B-Instruct-v0.2',
+        weights,
+        tokenizer,
         device='auto',
     ):
         self.query_generator, self.tokenizer = get_topic_to_pubmed_converter(
             weights=weights,
-            base_tokenizer=base_tokenizer,
+            tokenizer=tokenizer,
             device=device,
         )
         self.query_generator.eval()
@@ -123,6 +131,7 @@ class PubmedQueryGeneratorBot:
         See https://work.cochrane.org/pubmed for more details. Direct pubmed link: 
             https://pubmed.ncbi.nlm.nih.gov/?cmd=search&term=(randomized+controlled+trial%5Bpt%5D+OR+controlled+clinical+trial%5Bpt%5D+OR+randomized%5Btiab%5D+OR+placebo%5Btiab%5D+OR+clinical+trials+as+topic%5Bmesh%3Anoexp%5D+OR+randomly%5Btiab%5D+OR+trial%5Bti%5D+NOT+(animals%5Bmh%5D+NOT+humans+%5Bmh%5D))
         """
+        # TODO check that the filter isn't already present
         return query + ' AND ' + cls.rct_filter()
 
     @classmethod
