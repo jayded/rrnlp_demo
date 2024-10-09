@@ -39,7 +39,11 @@ if st.session_state.topic_information['finalize'] != 1:
     if len(search_prompt) > 0 and st.checkbox(f'Add Cochrane RCT filter? {cochrane_filter}', value=st.session_state.topic_information.get('use_rct_filter', False)):
         search_query = query + ' AND ' + cochrane_filter
         use_rct_filter = True
+    elif len(search_prompt) > 0:
+        search_query = query
+        use_rct_filter = False
     else:
+        search_query = ''
         use_rct_filter = False
 
     # TODO persist this
@@ -75,7 +79,22 @@ else:
     #else:
     #    search_query = query
     st.markdown(f'Results for: {search_query}')
-    st.write('No more search results can be added via pubmed searches. Add any others manually.')
+    st.write('No more search results can be added via pubmed searches. Add any others manually:')
+    with st.form('Insert bulk screening results'):
+        st.markdown('Insert a list of pmids to Include. Use spaces or commas to separate them')
+        include_pmids = st.text_area('Include pmids', value='')
+        st.markdown('Insert a list of pmids to Exclude. Use spaces or commas to separate them')
+        exclude_pmids = st.text_area('Exclude pmids', value='')
+        submitted = st.form_submit_button("Insert")
+        if submitted:
+            include_pmids = list(map(str.split(','), include_pmids.split()))
+            exclude_pmids = list(map(str.split(','), exclude_pmids.split()))
+            pmid_to_screening_result = {pmid: 'Include' for pmid in include_pmids}
+            pmid_to_screening_result.update({pmid: 'Exclude' for pmid in exclude_pmids})
+            database_utils.insert_topic_human_screening_pubmed_results(
+                topic_uid=st.session_state.topic_information['topic_uid'],
+                pmid_to_human_screening=pmid_to_screening_result,
+            )
 
 #if st.session_state.topic_information['finalize'] != 1:
 #    st.write('Click "Finalize" to finalize this search and begin screening. Once the search is finalized, no new searches may be added')
@@ -118,7 +137,8 @@ if len(search_prompt) > 0:
             st.markdown('Found no results for this search, generate a new search before committing to this one!')
             st.stop()
 
-    keep_columns = ['pmid', 'human_decision', 'robot_ranking', 'title', 'abstract', 'keywords', 'mesh_terms', 'authors']
+    keep_columns = ['pmid', 'human_decision', 'robot_ranking', 'titles', 'abstracts']
+    #keep_columns = ['pmid', 'human_decision', 'robot_ranking', 'title', 'abstract', 'keywords', 'mesh_terms', 'authors']
     df = df[keep_columns]
     print('loaded screening results', Counter(df['human_decision']))
     if st.session_state.topic_information['finalize'] == 1:
@@ -152,12 +172,12 @@ if len(search_prompt) > 0:
                 help='AutoRanker Results',
                 width='small',
             ),
-            'title': st.column_config.TextColumn(
+            'titles': st.column_config.TextColumn(
                 'Title',
                 help='pubmed article title',
                 width='large',
             ),
-            'abstract': st.column_config.TextColumn(
+            'abstracts': st.column_config.TextColumn(
                 'Abstract',
                 help='pubmed article abstract',
                 width='large',

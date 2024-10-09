@@ -161,5 +161,6 @@ if len(st.session_state.topic_information.get('search_prompt', '')) > 0 and len(
         submitted = st.form_submit_button("Perform Search")
         if submitted:
             st.session_state.topic_information['searched'] = searched
+            st.session_state.topic_information['base_query'] = query
             st.session_state.topic_information['use_rct_filter'] = use_rct_filter
             st.switch_page('pages/4-search_results_and_screening.py')

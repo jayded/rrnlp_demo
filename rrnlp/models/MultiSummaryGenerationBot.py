@@ -32,7 +32,7 @@ def load_mds_summary_bot(
 class MDSSummaryBot:
     def __init__(
         self,
-        model: AutoModel,
+        model: AutoModelForCausalLM,
         tokenizer: AutoTokenizer,
     ):
         self.model = model

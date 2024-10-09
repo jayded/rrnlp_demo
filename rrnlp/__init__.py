@@ -5,7 +5,7 @@ interface; will pull everything it can from an input article.
 Note: if you find this useful, please see:
         https://github.com/bwallace/RRnlp#citation.
 '''
-from typing import Type, Tuple, List
+from typing import Dict, List, Tuple, Type
 
 import warnings
 

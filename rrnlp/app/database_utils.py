@@ -3,6 +3,7 @@ from os.path import abspath, dirname, join
 
 import itertools
 import sqlite3
+import time
 import urllib
 
 import pandas as pd
@@ -137,7 +138,7 @@ def perform_pubmed_search(pubmed_query, topic_uid, persist):
     # first: perform the search and get the result document ids
     try:
         pubmed_query = pubmed_query.replace("''", '"')
-        count, pmids = SearchBot.PubmedQueryGeneratorBot.execute_pubmed_search(pubmed_query, retmax=200)
+        count, pmids = SearchBot.PubmedQueryGeneratorBot.execute_pubmed_search(pubmed_query, retmax=10000)
         pmids = set(pmids)
         count = int(count)
         print(f'retrieved {len(pmids)} pmids of {count}')
@@ -207,25 +208,45 @@ def perform_pubmed_search(pubmed_query, topic_uid, persist):
 
 def run_robot_ranker(topic_uid):
     # TODO active learning storage?
-    cur = get_db(True)
+    start_time = time.time()
+    cur = get_db(False)
     res = cur.execute('''select search_text from user_topics where topic_uid=?''', (topic_uid,))
-    topic = res.fetchone()
+    topic = res.fetchone()[0]
 
     res = cur.execute('''
         SELECT pmid FROM search_screening_results
         WHERE search_screening_results.topic_uid LIKE ?
     ''', (topic_uid,))
     pmids = res.fetchall()
-    screener = ScreenerBot.load_screener(device='cpu')
+    pmids = [x[0] for x in pmids]
+    #pmids = [x['pmid'] for x in pmids]
+    index_choice = st.session_state.config['default_pubmed_index']
+    default_weights = st.session_state.config['pubmed_indexes'][index_choice]['base_weights']
+    index_path = st.session_state.config['pubmed_indexes'][index_choice]['embeddings_path']
+    pmids_path = st.session_state.config['pubmed_indexes'][index_choice]['pmids_path']
+
+    # TODO should this be cached?
+    screener = ScreenerBot.load_screener(
+        weights=default_weights,
+        embeddings_path=index_path,
+        pmids_positions=pmids_path,
+        device='cpu',
+    )
     pmid_scores = screener.predict_for_topic(topic, pmids)
+    print('scores sample', pmid_scores[:20])
     #pmid_score_positions = screener.predict_for_topic(topic, pmids)
     #ranked_pmids, scores, positions = zip(*pmid_score_positions)
     #ranked_pmids, scores = zip(*(x['pmid'], x['distance'] for x in pmid_score_positions))
     ranked_pmids, scores = zip(*pmid_scores)
 
+    update_list = list(zip(scores, itertools.cycle([topic_uid]), ranked_pmids))
     cur.executemany('''
-        UPDATE search_screening_results(topic_uid, pmid, robot_ranking) VALUES(?, ?)
-    ''', zip(itertools.cycle([topic_uid]), ranked_pmids, scores))
+        UPDATE search_screening_results SET robot_ranking=? WHERE topic_uid=? and pmid LIKE ?
+    ''', update_list)
+    cur.commit()
+    print(update_list[:10])
+    end_time = time.time()
+    print(f'Updating {len(pmid_scores)} autoranking took {end_time - start_time} seconds')
 
 
 def get_topic_pubmed_results(topic_uid):
@@ -294,9 +315,14 @@ def get_pubmed_article_data(pmids: list):
     cur = get_db(True, db_path=st.session_state['pubmed_db_path'])
         #SELECT pmid,title,abstract,pubdate,mesh_terms,publication_types,issue,pages,journal,authors,chemical_list,keywords,doi,pmc,other_id,medline_ta,nlm_unique_id,issn_linking,country,grant_ids 
     print(f'loading database {st.session_state["pubmed_db_path"]} to get records for {len(pmids)} pmids')
+    #query = f'''
+    #    SELECT DISTINCT pmid,title,abstract,pubdate,mesh_terms,publication_types,journal,authors,chemical_list,keywords,doi
+    #    FROM pubmed_data
+    #    WHERE pmid IN ({','.join(map(str, pmids))})
+    #'''
     query = f'''
-        SELECT DISTINCT pmid,title,abstract,pubdate,mesh_terms,publication_types,journal,authors,chemical_list,keywords,doi
-        FROM pubmed_data
+        SELECT DISTINCT pmid,titles,abstracts
+        FROM titles_abstracts
         WHERE pmid IN ({','.join(map(str, pmids))})
     '''
     #print(query)
@@ -309,8 +335,8 @@ def get_auto_evidence_map_from_topic_uid(topic_uid):
     # TODO should this be joined with screening?
     cur = get_db(True)
     query = '''
-        SELECT studies.pmid, studies.intervention from studies 
-        INNER JOIN search_screening_results ON studies.pmid = search_screening_results.pmid
+        SELECT pubmed_extractions.pmid, pubmed_extractions.intervention from pubmed_extractions
+        INNER JOIN search_screening_results ON pubmed_extractions.pmid = search_screening_results.pmid
         WHERE topic_uid = :topic_uid
     '''
         #AND search_screening_results.human_decision = "Include"
@@ -319,9 +345,9 @@ def get_auto_evidence_map_from_topic_uid(topic_uid):
     pmids = pmids.fetchall()
     print(f'found {len(pmids)} pmids')
     res = cur.execute('''
-        SELECT studies.pmid, studies.title, studies.abstract, studies.intervention, studies.comparator, studies.outcome, studies.label, studies.evidence, studies.population, studies.sample_size, studies.prob_low_rob, studies.low_rsg_bias,studies.low_ac_bias,studies.low_bpp_bias
-        FROM studies
-        INNER JOIN search_screening_results ON studies.pmid = search_screening_results.pmid
+        SELECT pubmed_extractions.pmid, pubmed_extractions.title, pubmed_extractions.abstract, pubmed_extractions.intervention, pubmed_extractions.comparator, pubmed_extractions.outcome, pubmed_extractions.label, pubmed_extractions.evidence, pubmed_extractions.population, pubmed_extractions.sample_size, pubmed_extractions.prob_low_rob, pubmed_extractions.low_rsg_bias,pubmed_extractions.low_ac_bias,pubmed_extractions.low_bpp_bias
+        FROM pubmed_extractions
+        INNER JOIN search_screening_results ON pubmed_extractions.pmid = search_screening_results.pmid
         WHERE search_screening_results.topic_uid = :topic_uid
         AND search_screening_results.human_decision = "Include"
     ''', {'topic_uid': topic_uid})
@@ -334,7 +360,7 @@ def get_auto_evidence_map_from_pmids(pmids):
     cur = get_db(True)
     res = cur.executemany('''
         SELECT pmid, title, abstract, intervention, comparator, outcome, label, evidence, population, sample_size, prob_low_rob, low_rsg_bias,low_ac_bias,low_bpp_bias
-        FROM studies
+        FROM pubmed_extractions
         INNER_JOIN search_screening_results USING pmid
         WHERE pmid = ?
         AND human_decision = 'Include'

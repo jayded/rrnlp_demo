@@ -1,15 +1,18 @@
 import copy
 import json
 import os
-import sys 
+import sys
+import time
 from typing import List, Optional, Tuple, Type
 
-import faiss
-import numpy as np 
+#import faiss
+import numpy as np
 
 #from pymilvus import MilvusClient
-import torch 
+import torch
 import torch.nn.functional as F
+
+from annoy import AnnoyIndex
 
 from transformers import AutoModel, AutoTokenizer
 
@@ -17,102 +20,140 @@ from rrnlp.models import get_device
 
 #weights_path = rrnlp.models.weights_path
 # TODO
-weights = 'facebook/contriever'
+#weights = 'facebook/contriever'
 #embeddings_path = ''
-embeddings_path = '/media/more_data/jay/overflow/ei_demo/data/contriever_index/faiss_index.bin'
-pmids_positions = '/media/more_data/jay/overflow/ei_demo/data/contriever_index/pmids.json'
+#embeddings_path = '/media/more_data/jay/overflow/ei_demo/data/contriever_index/faiss_index.bin'
+#pmids_positions = '/media/more_data/jay/overflow/ei_demo/data/contriever_index/pmids.json'
 
 def load_screener(
-        weights: str=weights, #hf model string or path
+        weights: str=None, #hf model string or path
         #embeddings_path: str=embeddings_path, # milvus embedding path
-        #milvus_collection: str='contriever', # 
-        embeddings_path: str=embeddings_path, #faiss embedding path
-        pmids_positions: str=pmids_positions, #turn a faiss index to a pmid
+        #milvus_collection: str='contriever', #
+        embeddings_path: str=None, #Annoy embedding path
+        pmids_positions: str=None, #turn a faiss index to a pmid
         device='auto',
     ):
     device = get_device(device)
     model = AutoModel.from_pretrained(weights).to(device)
     tokenizer = AutoTokenizer.from_pretrained(weights)
-    #milvus_client = client = MilvusClient(embeddings_path)
-    # TODO should these items be joined together?
-    index = None
     #with open(embeddings_path, 'rb') as inf:
     #    reader = faiss.PyCallbackIOReader(inf.read)
     #    index = faiss.read_index(reader, faiss.IO_FLAG_MMAP | faiss.IO_FLAG_READ_ONLY)
     #    #index = faiss.read_index(reader)
-    with open(pmids_positions, 'r') as inf:
-        position_to_pmid = json.loads(inf)
-    return Screener(model, tokenizer, index, position_to_pmid)
+    #with open(pmids_positions, 'r') as inf:
+    #    position_to_pmid = json.loads(inf.read())
+    ranker = AnnoyRanker.create(embeddings_path, pmids_positions)
+    return Screener(model, tokenizer, ranker) #, position_to_pmid)
 
+
+# TODO this probably also needs to be factored out so we can have a faiss version too
+# since these indexes are such a pain and don't always cooperate with being loaded in
+# different systems/RAM configurations.
+class AnnoyRanker:
+    def __init__(
+        self,
+        index: AnnoyIndex,
+        position_to_pmid: List,
+        # TODO: grow a metric?
+    ):
+        self.index = index
+        self.position_to_pmid = position_to_pmid
+        self.pmid_to_position = dict(reversed(x) for x in enumerate(self.position_to_pmid))
+        assert len(self.position_to_pmid) == self.index.get_n_items()
+
+    @classmethod
+    def create(cls, index_path, pmids_path):
+        # TODO is using dot sacrificing anything?
+        index = AnnoyIndex(768, 'dot')
+        index.load(index_path)
+        with open(pmids_path, 'r') as inf:
+            position_to_pmid = json.loads(inf.read())
+        return AnnoyRanker(index, position_to_pmid)
+
+    def compute_distances(self, vec: np.array, pmids: List):
+        vec = np.array(vec)
+        vec = vec.reshape(-1, 1)
+        positions = [self.pmid_to_position[pmid] for pmid in pmids]
+        # TODO note this uses dot, if we want a different measure (say, angular), we'll need to compute that manually since it seems Annoy doesn't expose that (note: verify this)
+        embeds = [self.index.get_item_vector(position) for position in positions]
+        embeds = np.array(embeds)
+        distances = embeds @ vec
+        distances = distances.squeeze()
+        print(embeds.shape, vec.shape, distances.shape)
+        return pmids, distances
+
+    def find_nns_for_vec(self, vec: np.array, pmids: Optional[List]=None):
+        raise NotImplementedError("Not presently using this capacity of a vector index")
+
+    def known_pmids(self):
+        return set(self.pmid_to_position.keys())
 
 class Screener:
     def __init__(
         self,
         model: AutoModel,
         tokenizer: AutoTokenizer,
-        embedding_index, # what is the right type?
-        #collection_name, # TODO is this the right choice? do we want to add other options?
-        position_to_pmid: List,
+        #position_to_pmid: List,
+        ranker: AnnoyRanker,
     ):
         self.model = model
         self.tokenizer = tokenizer
-        self.embedding_index = embedding_index
-        self.position_to_pmid = position_to_pmid
-        # note: a pmid might appear multiple times, this takes the _last_ one 
+        self.ranker = ranker
+        #self.position_to_pmid = position_to_pmid
+        # note: a pmid might appear multiple times, this takes the _last_ one
         # as later entries overwrite earlier ones in the dict constructor
-        self.pmid_to_position = dict(reversed(x) for x in enumerate(self.position_to_pmid))
+        #self.pmid_to_position = dict(reversed(x) for x in enumerate(self.position_to_pmid))
 
+    @classmethod
     def mean_pooling(cls, token_embeddings, mask):
         # https://huggingface.co/facebook/contriever
         token_embeddings = token_embeddings.masked_fill(~mask[..., None].bool(), 0.)
         sentence_embeddings = token_embeddings.sum(dim=1) / mask.sum(dim=1)[..., None]
-        return sentence_embeddings.detach().cpu().numpy()
+        return sentence_embeddings
 
-    def predict_for_topic(self, topic: str, pmids: List, use_disk_location: Optional[str]=None):
+    def predict_for_topic(self, topic: str, pmids: List, custom_model_path: Optional[str]=None):
         pmids = set(pmids)
-        input_embeddings = self.embed_topic(topic, use_disk_location=use_disk_location)
+        pmids_in_db = list(self.ranker.known_pmids() & pmids) # list so the order is consistent
+        print(pmids)
+        start_time = time.time()
+        input_embeddings = self.embed_topic(topic, custom_model_path=custom_model_path)
+        embeddings_compute_end = time.time()
+        print(f'Computing topic embeddings took {embeddings_compute_end - start_time}')
 
         if pmids is not None and len(pmids) > 0:
-            pmids = ','.join(set(pmids))
-            res = client.search(
-                collection_name=self.collection_name,
-                data=input_embeddings,
-                filter=f"pmid in [pmids]",
-                limit=len(pmids),
-                output_fields=["pmid"],
-            )
-            filter_ids = [self.pmid_to_position[pmid] for pmid in pmids]
-            id_selector = faiss.IDSelectorArray(filter_ids)
-            params = faiss.SearchParameters(sel=id_selector)
-            distance, positions = self.embedding_index.search(input_embeddings, len(pmids), params=params)
+            print(f'Have {len(pmids_in_db)} pmids of total requested {len(pmids)} pmids')
+            res_pmids, distances = self.ranker.compute_distances(input_embeddings, pmids_in_db)
+            #filter_ids = [self.pmid_to_position[pmid] for pmid in pmids_in_db]
+            #id_selector = faiss.IDSelectorArray(filter_ids)
+            #params = faiss.SearchParameters(sel=id_selector)
+            #distance, positions = self.embedding_index.search(input_embeddings, len(pmids_in_db), params=params)
+            #res = zip((self.position_to_pmid[x] for x in positions), distance)
+            embedding_end = time.time()
+            print(f'Computing distances took {embedding_end - embeddings_compute_end} seconds')
         else:
             assert False
-            #params = None
-            #distance, positions = self.embedding_index.search(input_embeddings, 10000, params=params)
-        res = zip((self.position_to_pmid[x] for x in positions), distance)
-        #res = zip((self.position_to_pmid[x] for x in positions), distance, positions)
-        #if pmids is not None:
-        #    res = filter(lambda x: x in pmids, res)
-        #res = list(res)
+        res = list(zip(res_pmids, distances))
+        sorted(res, key=lambda x: x[1], reverse=True)
         return res
 
-    def embed_topic(self, topic: str, use_disk_location=None):
-        if use_disk_location is not None:
-            model = AutoModel.from_pretrained(use_disk_location)
+    def embed_topic(self, topic: str, custom_model_path=None):
+        if custom_model_path is not None:
+            model = AutoModel.from_pretrained(custom_model_path)
         else:
             model = self.model
-        inputs = self.tokenizer([topic], padding=True, truncation=True, return_tensors="pt").to(self.model.device)
+        inputs = self.tokenizer(topic, padding=True, truncation=True, return_tensors="pt").to(self.model.device)
+        print(inputs)
         with torch.no_grad():
-            outputs = model(inputs, output_dict=True)
-            embeds = Screener.mean_pooling(outputs['return_attention_mask'], inputs['return_attention_mask'])
+            outputs = model(**inputs, return_dict=True)
+            embeds = Screener.mean_pooling(token_embeddings=outputs['last_hidden_state'], mask=inputs['attention_mask'])
             embeds = F.normalize(embeds, p=2, dim=1)
         return embeds.detach()
 
     def embed_abs(self, ti_abs: List[dict]):
         input_texts = [ti_ab['ti'] + '\n' + ti_ab['ab'] for ti_ab in ti_abs]
         inputs = self.tokenizer(input_texts, padding=True, truncation=True, return_tensors="pt").to(self.model.device)
-        outputs = self.model(inputs, output_dict=True)
-        embeds = Screener.mean_pooling(outputs['return_attention_mask'], inputs['return_attention_mask'])
+        outputs = self.model(inputs, return_dict=True)
+        embeds = Screener.mean_pooling(token_embeddings=outputs['last_hidden_state'], mask=inputs['attention_mask'])
         embeds = F.normalize(embeds, p=2, dim=1)
         return embeds.detach()
 
@@ -140,7 +181,7 @@ class Screener:
             # finetune only the last layer
             for param in model.encoder.layer[-1].parameters():
                 param.requires_grad = True
-        
+
         positive_embeddings = [self.embedding_index.xb.at(self.pmid_to_position[pmid]) for pmid in positive_ids]
         negative_embeddings = [self.embedding_index.xb.at(self.pmid_to_position[pmid]) for pmid in negative_ids]
 
@@ -166,7 +207,7 @@ class Screener:
             negative_loss_component = torch.sum(negative_loss_components)
 
             loss_components = []
-            
+
             for positive_doc_embedding in positive_doc_embeddings:
                 pos_value = s(topic_embedding, positive_doc_embedding)/temperature
                 loss_components.append(pos_value / (pos_value + negative_loss_component))

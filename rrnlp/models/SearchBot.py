@@ -22,7 +22,8 @@ from rrnlp.models import get_device
 #weights_path = rrnlp.models.weights_path
 # TODO
 #weights = '/media/more_data/jay/overflow/ei_demo/base_query_model_stripped/Review_title'
-weights = '/media/more_data/jay/overflow/ei_demo/base_query_model/Review_title/checkpoint_epoch_0006'
+weights = '/data/ei_demo/gaelen_stuff/Review_title/'
+#weights = '/media/more_data/jay/overflow/ei_demo/base_query_model/Review_title/checkpoint_epoch_0006'
 #weights = '/media/more_data/jay/overflow/ei_demo/RRnlp/ckpt6_merged'
 
 #weights = '/media/more_data/jay/overflow/ei_demo/base_query_model/Review_title/checkpoint_epoch_0006'
