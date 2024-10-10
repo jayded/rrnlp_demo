@@ -24,7 +24,10 @@ if not st.session_state.get('loaded_config', False):
 
 # speed up loading, so this only happens once.
 # for development
+get_searcher_start = time.time()
 searcher = get_searcher()
+get_searcher_end = time.time()
+print(f'getting the searcher took {get_searcher_end - get_searcher_start} seconds')
 
 @st.cache_data
 def generate_search(search_prompt):
@@ -156,6 +159,7 @@ if len(st.session_state.topic_information.get('search_prompt', '')) > 0 and len(
     else:
         search_query = query
         use_rct_filter = False
+    st.session_state.topic_information['run_ranker'] = st.checkbox('Run AutoRanker (~1 minue / 5k)?', value=st.session_state.topic_information.get('run_ranker', False))
     with st.form("search"):
         searched = st.text_area('Search query', value=search_query)
         submitted = st.form_submit_button("Perform Search")

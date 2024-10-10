@@ -77,6 +77,7 @@ class AnnoyRanker:
         # TODO note this uses dot, if we want a different measure (say, angular), we'll need to compute that manually since it seems Annoy doesn't expose that (note: verify this)
         embeds = [self.index.get_item_vector(position) for position in positions]
         embeds = np.array(embeds)
+        print(embeds.shape, vec.shape)
         distances = embeds @ vec
         distances = distances.squeeze()
         print(embeds.shape, vec.shape, distances.shape)
@@ -114,7 +115,7 @@ class Screener:
     def predict_for_topic(self, topic: str, pmids: List, custom_model_path: Optional[str]=None):
         pmids = set(pmids)
         pmids_in_db = list(self.ranker.known_pmids() & pmids) # list so the order is consistent
-        print(pmids)
+        print(f'Processing for {len(pmids)} pmids')
         start_time = time.time()
         input_embeddings = self.embed_topic(topic, custom_model_path=custom_model_path)
         embeddings_compute_end = time.time()

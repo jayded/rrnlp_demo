@@ -133,7 +133,7 @@ def _setify(xs):
     return '; '.join(set(parts))
 
 @st.cache_data
-def perform_pubmed_search(pubmed_query, topic_uid, persist):
+def perform_pubmed_search(pubmed_query, topic_uid, persist, run_ranker=False):
     # TODO allow reset the search results?
     # first: perform the search and get the result document ids
     try:
@@ -165,8 +165,7 @@ def perform_pubmed_search(pubmed_query, topic_uid, persist):
         else:
             screening_results = pd.DataFrame.from_records([{'pmid': pmid, 'human_decision': 'Unscreened', 'robot_ranking': None} for pmid in pmids])
 
-        
-    # pmid, human_decision, robot_ranking
+
     screening_results['pmid'] = screening_results['pmid'].astype('int64')
     #print('sdf', screening_results.columns)
     assert len(set(screening_results['pmid'].tolist()) & set(map(int, pmids))) > 0
@@ -202,6 +201,31 @@ def perform_pubmed_search(pubmed_query, topic_uid, persist):
     assert len(article_data) > 0, f"Error in retrieving article data"
 
     df = pd.merge(screening_results, article_data_df, on='pmid', how='outer')
+    if run_ranker:
+        ranking_start = time.time()
+        index_choice = st.session_state.config['default_pubmed_index']
+        default_weights = st.session_state.config['pubmed_indexes'][index_choice]['base_weights']
+        index_path = st.session_state.config['pubmed_indexes'][index_choice]['embeddings_path']
+        pmids_path = st.session_state.config['pubmed_indexes'][index_choice]['pmids_path']
+        screener = ScreenerBot.load_screener(
+            weights=default_weights,
+            embeddings_path=index_path,
+            pmids_positions=pmids_path,
+            device='cpu',
+        )
+        topic = st.session_state.topic_information['search_prompt']
+        print('topic', topic)
+        pmid_scores = screener.predict_for_topic(topic, list(map(str, df['pmid'].to_list())))
+        pmid_scores = [(int(x[0]), x[1]) for x in pmid_scores]
+        print('scores sample', pmid_scores[:10])
+        pmid_scores = dict(pmid_scores)
+        df['robot_ranking'] = [pmid_scores.get(pmid, None) for pmid in df['pmid']]
+        article_data_df['robot_ranking'] = [pmid_scores.get(pmid, None) for pmid in article_data_df['pmid']]
+        ranking_end = time.time()
+        print(f'AutoRanking took {ranking_end - ranking_start} seconds')
+        df = df.sort_values(by='robot_ranking', ascending=False, na_position='last')
+        print('df samples', df[:10].to_dict(orient='records'))
+        print('article_data_df samples', article_data_df[:10].to_dict(orient='records'))
     # TODO sort by screener rating
     return count, pmids, article_data_df, df, None
 
@@ -216,6 +240,7 @@ def run_robot_ranker(topic_uid):
     res = cur.execute('''
         SELECT pmid FROM search_screening_results
         WHERE search_screening_results.topic_uid LIKE ?
+        ORDER BY search_screening_results.robot_ranking DESC
     ''', (topic_uid,))
     pmids = res.fetchall()
     pmids = [x[0] for x in pmids]
@@ -255,6 +280,7 @@ def get_topic_pubmed_results(topic_uid):
     res = cur.execute('''
         SELECT user_topics(topic_uid, pmid, human_decision, robot_ranking)
         WHERE topic_uid LIKE (?,)
+        ORDER BY robot_ranking DESC
     ''', (topic_uid,))
     results = res.fetchall()
     close_db(cur)
@@ -263,7 +289,12 @@ def get_topic_pubmed_results(topic_uid):
 
 def fetch_pmids_and_screening_results(topic_uid):
     cur = get_db(True)
-    res = cur.execute('''SELECT pmid, human_decision, robot_ranking FROM search_screening_results WHERE topic_uid = ?''', (topic_uid,))
+    res = cur.execute('''
+        SELECT pmid, human_decision, robot_ranking
+        FROM search_screening_results
+        WHERE topic_uid = ?
+        ORDER BY robot_ranking DESC
+    ''', (topic_uid,))
     results = res.fetchall()
     close_db(cur)
     return results
@@ -272,9 +303,14 @@ def insert_unscreened_pmids(topic_uid, pmids):
     cur = get_db(True)
     cur.executemany('''
         INSERT OR REPLACE INTO search_screening_results(topic_uid, pmid) VALUES(?, ?)
-    ''', [(topic_uid, pmid) for pmid in pmids])
+    ''', [(topic_uid, str(pmid)) for pmid in pmids])
     cur.commit()
-    res = cur.execute('''SELECT pmid, human_decision, robot_ranking FROM search_screening_results WHERE topic_uid = ?''', (topic_uid,))
+    res = cur.execute('''
+        SELECT pmid, human_decision, robot_ranking
+        FROM search_screening_results
+        WHERE topic_uid = ?
+        ORDER BY robot_ranking DESC
+    ''', (topic_uid,))
     results = res.fetchall()
     close_db(cur)
     return results
@@ -295,25 +331,28 @@ def get_persisted_pubmed_search_and_screening_results(topic_uid):
     #article_data_pmids = set(article_data_df['pmid'].apply(int).tolist())
     #search_pmids = set(map(int, pmids))
 
+    screening_results['pmid'] = screening_results['pmid'].astype(str)
+    article_data_df['pmid'] = article_data_df['pmid'].astype(str)
     df = pd.merge(screening_results, article_data_df, on='pmid', how='outer')
+    df = df.sort_values(by='robot_ranking', ascending=False, na_position='last')
     # TODO sort by screener rating
     return len(pmids), pmids, article_data_df, df
 
-def insert_topic_human_screening_pubmed_results(topic_uid, pmid_to_human_screening: dict):
+def insert_topic_human_screening_pubmed_results(topic_uid, pmid_to_human_screening: dict, source='automatic'):
     cur = get_db(False)
     # TODO do these need to be escaped?
     decisions = Counter(pmid_to_human_screening.values())
     print(f'attempting to insert {len(pmid_to_human_screening)}; {decisions} screening decisions for topic {topic_uid}')
     cur.executemany('''
-        INSERT OR REPLACE INTO search_screening_results(topic_uid, pmid, human_decision)
-        VALUES(:ti, :pm, :hs)
-    ''', [{'hs': human, 'ti': topic_uid, 'pm': pmid} for (pmid, human) in pmid_to_human_screening.items()])
+        INSERT OR REPLACE INTO search_screening_results(topic_uid, pmid, human_decision, source)
+        VALUES(:ti, :pm, :hs, :src)
+    ''', [{'hs': human, 'ti': topic_uid, 'pm': pmid, 'src': source} for (pmid, human) in pmid_to_human_screening.items()])
     cur.commit()
     close_db(cur)
 
 def get_pubmed_article_data(pmids: list):
     cur = get_db(True, db_path=st.session_state['pubmed_db_path'])
-        #SELECT pmid,title,abstract,pubdate,mesh_terms,publication_types,issue,pages,journal,authors,chemical_list,keywords,doi,pmc,other_id,medline_ta,nlm_unique_id,issn_linking,country,grant_ids 
+        #SELECT pmid,title,abstract,pubdate,mesh_terms,publication_types,issue,pages,journal,authors,chemical_list,keywords,doi,pmc,other_id,medline_ta,nlm_unique_id,issn_linking,country,grant_ids
     print(f'loading database {st.session_state["pubmed_db_path"]} to get records for {len(pmids)} pmids')
     #query = f'''
     #    SELECT DISTINCT pmid,title,abstract,pubdate,mesh_terms,publication_types,journal,authors,chemical_list,keywords,doi
@@ -322,7 +361,7 @@ def get_pubmed_article_data(pmids: list):
     #'''
     query = f'''
         SELECT DISTINCT pmid,titles,abstracts
-        FROM titles_abstracts
+        FROM pubmed_data
         WHERE pmid IN ({','.join(map(str, pmids))})
     '''
     #print(query)
@@ -335,8 +374,8 @@ def get_auto_evidence_map_from_topic_uid(topic_uid):
     # TODO should this be joined with screening?
     cur = get_db(True)
     query = '''
-        SELECT pubmed_extractions.pmid, pubmed_extractions.intervention from pubmed_extractions
-        INNER JOIN search_screening_results ON pubmed_extractions.pmid = search_screening_results.pmid
+        SELECT pubmed_extractions_ico_re.pmid, pubmed_extractions_ico_re.intervention from pubmed_extractions_ico_re
+        INNER JOIN search_screening_results ON pubmed_extractions_ico_re.pmid = search_screening_results.pmid
         WHERE topic_uid = :topic_uid
     '''
         #AND search_screening_results.human_decision = "Include"
@@ -345,11 +384,12 @@ def get_auto_evidence_map_from_topic_uid(topic_uid):
     pmids = pmids.fetchall()
     print(f'found {len(pmids)} pmids')
     res = cur.execute('''
-        SELECT pubmed_extractions.pmid, pubmed_extractions.title, pubmed_extractions.abstract, pubmed_extractions.intervention, pubmed_extractions.comparator, pubmed_extractions.outcome, pubmed_extractions.label, pubmed_extractions.evidence, pubmed_extractions.population, pubmed_extractions.sample_size, pubmed_extractions.prob_low_rob, pubmed_extractions.low_rsg_bias,pubmed_extractions.low_ac_bias,pubmed_extractions.low_bpp_bias
-        FROM pubmed_extractions
-        INNER JOIN search_screening_results ON pubmed_extractions.pmid = search_screening_results.pmid
+        SELECT pubmed_extractions_ico_re.pmid, pubmed_extractions_ico_re.title, pubmed_extractions_ico_re.abstract, pubmed_extractions_ico_re.intervention, pubmed_extractions_ico_re.comparator, pubmed_extractions_ico_re.outcome, pubmed_extractions_ico_re.label, pubmed_extractions_ico_re.evidence, pubmed_extractions_ico_re.population, pubmed_extractions_ico_re.sample_size, pubmed_extractions_ico_re.prob_low_rob, pubmed_extractions_ico_re.low_rsg_bias,pubmed_extractions_ico_re.low_ac_bias,pubmed_extractions_ico_re.low_bpp_bias
+        FROM pubmed_extractions_ico_re
+        INNER JOIN search_screening_results ON pubmed_extractions_ico_re.pmid = search_screening_results.pmid
         WHERE search_screening_results.topic_uid = :topic_uid
         AND search_screening_results.human_decision = "Include"
+        ORDER BY search_screening_results.robot_ranking DESC
     ''', {'topic_uid': topic_uid})
     selections = res.fetchall()
     close_db(cur)
@@ -360,10 +400,11 @@ def get_auto_evidence_map_from_pmids(pmids):
     cur = get_db(True)
     res = cur.executemany('''
         SELECT pmid, title, abstract, intervention, comparator, outcome, label, evidence, population, sample_size, prob_low_rob, low_rsg_bias,low_ac_bias,low_bpp_bias
-        FROM pubmed_extractions
+        FROM pubmed_extractions_ico_re
         INNER_JOIN search_screening_results USING pmid
         WHERE pmid = ?
         AND human_decision = 'Include'
+        ORDER BY search_screening_results.robot_ranking DESC
     ''', pmids)
     selections = res.fetchall()
     close_db(cur)
