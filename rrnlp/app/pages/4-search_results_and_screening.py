@@ -20,22 +20,19 @@ if 'topic_information' not in st.session_state or 'topic_uid' not in st.session_
 if not st.session_state.get('loaded_config', False):
     database_utils.load_config()
 
-#if 'db_path' not in st.session_state:
-#    with open(config_file, 'r', encoding='utf-8') as file:
-#        config = yaml.load(file, Loader=SafeLoader)
-#    st.session_state.db_path = config['db_path']
-#    st.session_state.pubmed_db_path = config['pubmed_db_path']
-
-
 cochrane_filter = SearchBot.PubmedQueryGeneratorBot.rct_filter()
 
 # TODO don't use the copies when they can be avoided
 search_prompt = st.session_state.topic_information.get('search_prompt', '')
 query = st.session_state.topic_information.get('query', '')
 
-
-# TODO set this up so it shows the final query when the search has been finalized
 if st.session_state.topic_information['finalize'] != 1:
+    with st.form("search"):
+        searched = st.text_area('Boolean query', value=search_query)
+        submitted = st.form_submit_button("Search")
+        if submitted:
+            st.session_state.searched = searched
+
     if len(search_prompt) > 0 and st.checkbox(f'Add Cochrane RCT filter? {cochrane_filter}', value=st.session_state.topic_information.get('use_rct_filter', False)):
         search_query = query + ' AND ' + cochrane_filter
         use_rct_filter = True
@@ -45,22 +42,18 @@ if st.session_state.topic_information['finalize'] != 1:
     else:
         search_query = ''
         use_rct_filter = False
-
     # TODO persist this
-    st.session_state.use_rct_filter = use_rct_filter
-    with st.form("search"):
-        searched = st.text_area('Boolean query', value=search_query)
-        submitted = st.form_submit_button("Search")
-        if submitted:
-            st.session_state.searched = searched
-            #st.switch_page('pages/3-search_results_and_screening.py')
+    st.session_state.topic_information['use_rct_filter'] = use_rct_filter
+
+    run_ranker = st.checkbox('Run AutoRanker (~1 minute / 5k)?', value=st.session_state.topic_information.get('run_ranker', False))
+
     st.write('Click "Finalize" to finalize this search and begin screening. Once the search is finalized, no new searches may be added')
     if st.button('Finalize'):
         st.session_state.topic_information['finalize'] = 1
         finalize = 1
     else:
         finalize = 0
-    run_ranker = st.checkbox('Run AutoRanker (~1 minute / 5k)?', value=st.session_state.topic_information.get('run_ranker', False))
+
     # TODO don't rerun if the search is unchanged
     if search_query != st.session_state.topic_information.get('last_searched', ''):
         count, pmids, article_data, df, e = database_utils.perform_pubmed_search(search_query, st.session_state.topic_information['topic_uid'], persist=1, run_ranker=True)
@@ -124,47 +117,10 @@ else:
         article_data = st.session_state.topic_information['article_data']
         df = st.session_state.topic_information['df']
 
-#if st.session_state.topic_information['finalize'] != 1:
-#    st.write('Click "Finalize" to finalize this search and begin screening. Once the search is finalized, no new searches may be added')
-#    if st.button('Finalize'):
-#        st.session_state.topic_information['finalize'] = 1
-#        finalize = 1
-#    else:
-#        finalize = 0
-#    count, pmids, article_data, df, e = database_utils.perform_pubmed_search(search_prompt, st.session_state.topic_information['topic_uid'], persist=finalize)
-#    # we separate these two so the search will be persisted and *then* the topic information updated; doing it the other way means any issues 
-#    if finalize == 1:
-#        st.markdown('All new pmids will be inserted and persisted into the database for this particular search')
-#        database_utils.write_topic_info(
-#            topic_uid=st.session_state.topic_information['topic_uid'],
-#            uid=st.session_state.uid,
-#            topic_name=st.session_state.topic_information['topic_name'],
-#            search_prompt=st.session_state.topic_information['search_prompt'],
-#            query=st.session_state.topic_information['query'],
-#            final=st.session_state.topic_information['finalize'])
-#else:
-#    st.write('No more search results can be added via pubmed searches. Add any others manually.')
 
 
 if len(search_prompt) > 0:
     if st.session_state.topic_information['finalize'] != 1:
-        #if search_prompt != st.session_state.topic_information.get('last_searched', '') or st.session_state.topic_information.get('article_data_df', None) is None:
-        #    count, pmids, article_data, df, e = database_utils.perform_pubmed_search(search_prompt, st.session_state.topic_information['topic_uid'], persist=st.session_state.topic_information['finalize'] == 1)
-        #    st.session_state.topic_information['last_searched'] = search_prompt
-        #    st.session_state.topic_information['count'] = count
-        #    st.session_state.topic_information['pmids'] = pmids
-        #    st.session_state.topic_information['article_data'] = article_data
-        #    st.session_state.topic_information['article_data_df'] = df
-        #    st.session_state.topic_information['e'] = e
-        #else:
-        #    count = st.session_state.topic_information['count']
-        #    pmids = st.session_state.topic_information['pmids']
-        #    article_data = st.session_state.topic_information['article_data']
-        #    df = st.session_state.topic_information['article_data_df']
-        #    e = st.session_state.topic_information['e']
-        ##st.session_state.topic_information['pmids'] = pmids
-        ##st.session_state.topic_information['article_data_df'] = df
-        ##print('dataframe columns', df.columns)
         if count == 0:
             st.markdown('Found no results for this search, generate a new search before committing to this one!')
             st.stop()
@@ -179,25 +135,17 @@ if len(search_prompt) > 0:
             st.stop()
 
     keep_columns = ['pmid', 'human_decision', 'robot_ranking', 'titles', 'abstracts']
-    #keep_columns = ['pmid', 'human_decision', 'robot_ranking', 'title', 'abstract', 'keywords', 'mesh_terms', 'authors']
     df = df[keep_columns]
     print('loaded screening results', Counter(df['human_decision']))
     if st.session_state.topic_information['finalize'] == 1:
         edit_columns = ['human_decision']
     else:
         st.write('To manually screen, the search strategy must be "finalized" by selecting the button above. At this point, no searches may be modified or added to this topic, and the list of pmids to screen will be frozen.')
-        # TODO allow manual addition of pmids
         edit_columns = []
     frozen_columns = set(keep_columns) - set(edit_columns)
-    # TODO this should only update the screened values
     if 'screening_results' not in st.session_state.topic_information:
         st.session_state.topic_information['screening_results'] = df
-    #if st.session_state.topic_information.get('finalize', 0) == 1:
-    #    on_change = lambda: database_utils.insert_topic_human_screening_pubmed_results(st.session_state.topic_information['topic_uid'], dict(zip(st.session_state.topic_information['screening_results']['pmid'], st.session_state.topic_information['screening_results']['human_decision'])))
-    #else:
-    #    on_change = None
-    print('cols', df.columns)
-    #df.set_index('pmid')
+
     if st.session_state.topic_information.get('finalize', 0) == 1:
         if finetune_ranker := st.button('Finetune AutoRanker'):
             pass
@@ -246,7 +194,7 @@ if len(search_prompt) > 0:
         num_rows='dynamic',
         #on_change=on_change,
     )
-    # just let the database handle changes (or lack thereof)
+
     if st.session_state.topic_information.get('finalize', 0) == 1:
         print('saving screening results', Counter(st.session_state.topic_information['screening_results']['human_decision']))
         database_utils.insert_topic_human_screening_pubmed_results(
@@ -260,15 +208,7 @@ if len(search_prompt) > 0:
         )
 
 
-## TODO train robot screener
-#with st.form("Train screener"):
-#    submitted = st.form_submit_button("Search")
-#    if submitted:
-#        st.switch_page('pages/4-search_results_and_screening.py')
-
-if st.button("View Evidence Map"):
-    #submitted = st.form_submit_button("View Evidence Map")
-    #if submitted:
-        print('saving screening results post submit button', Counter(st.session_state.topic_information['screening_results']['human_decision']))
-        database_utils.insert_topic_human_screening_pubmed_results(st.session_state.topic_information['topic_uid'], dict(zip(st.session_state.topic_information['screening_results']['pmid'], st.session_state.topic_information['screening_results']['human_decision'])))
-        st.switch_page('pages/5-evidence_map.py')
+if st.session_state.topic_information.get('finalize', 0) == 1 and st.button("View Evidence Map"):
+    print('saving screening results post submit button', Counter(st.session_state.topic_information['screening_results']['human_decision']))
+    database_utils.insert_topic_human_screening_pubmed_results(st.session_state.topic_information['topic_uid'], dict(zip(st.session_state.topic_information['screening_results']['pmid'], st.session_state.topic_information['screening_results']['human_decision'])))
+    st.switch_page('pages/5-evidence_map.py')
