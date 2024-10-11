@@ -416,6 +416,39 @@ def get_auto_evidence_map_from_topic_uid(topic_uid):
     close_db(cur)
     return pmids, selections
 
+def insert_numerical_extractions(extraction: List[Tuple]):
+    cur = get_db(True)
+    query = '''
+        INSERT or REPLACE INTO pubmed_extractions_numerical(pmid, intervention, comparator, outcome, outcome_type, binary_result, continuous_result) VALUES(?,?,?,?,?,?,?)
+        '''
+    cur.executemany(query, extractions)
+    cur.commit()
+
+def get_numerical_extractions_for_topic(topic_uid):
+    cur = get_db(True)
+    query = '''
+        SELECT
+            pubmed_extractions_ico_re.pmid,
+            pubmed_extractions.title AS title,
+            pubmed_extractions.abstract as abstract,
+            pubmed_extractions_numerical.intervention,
+            pubmed_extractions_numerical.comparator,
+            pubmed_extractions_numerical.outcome,
+            pubmed_extractions_numerical.outcome_type,
+            pubmed_extractions_numerical.binary_result,
+            pubmed_extractions_numerical.continuous_result
+        FROM pubmed_extractions_numerical
+        INNER JOIN search_screening_results ON pubmed_extractions_numerical.pmid = search_screening_results.pmid
+        INNER JOIN pubmed_extractions ON pubmed_extractions.pmid = search_screening_results.pmid
+        WHERE search_screening_results.topic_uid = :topic_uid
+        AND search_screening_results.human_decision = "Include"
+        ORDER BY search_screening_results.robot_ranking DESC
+    '''
+    res = cur.execute(query, {'topic_uid': topic_uid})
+    selections = res.fetchall()
+    close_db(cur)
+    return selections
+
 def get_auto_evidence_map_from_pmids(pmids):
     # TODO should this be joined with screening?
     cur = get_db(True)
