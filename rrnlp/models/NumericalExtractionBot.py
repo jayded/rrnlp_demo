@@ -24,10 +24,11 @@ binary_outcomes_model = 'meta-llama/Meta-Llama-3.1-8B-Instruct'
 continuous_outcomes_model = 'meta-llama/Meta-Llama-3.1-8B-Instruct'
 
 
-def get_numerical_extractor_bot() -> 'NumericalExtractorBot':
+def get_numerical_extractor_bot(device: str='auto') -> 'NumericalExtractorBot':
+    device = get_device(device)
     # since we know, for the moment, that these model types are shared, let's not load the same model multiple times.
     model_types = set([outcome_type_model, binary_outcomes_model, continuous_outcomes_model])
-    model_set = {x: AutoModelForCausalLM.from_pretrained(x) for x in model_types}
+    model_set = {x: AutoModelForCausalLM.from_pretrained(x).to(device=device) for x in model_types}
     tokenizer_set = {x: AutoTokenizer.from_pretrained(x) for x in model_types}
     models = {
         'outcome_type': model_set[outcome_type_model],
