@@ -383,14 +383,35 @@ def get_auto_evidence_map_from_topic_uid(topic_uid):
     pmids = cur.execute(query, {'topic_uid': topic_uid})
     pmids = pmids.fetchall()
     print(f'found {len(pmids)} pmids')
-    res = cur.execute('''
-        SELECT pubmed_extractions_ico_re.pmid, pubmed_extractions_ico_re.title, pubmed_extractions_ico_re.abstract, pubmed_extractions_ico_re.intervention, pubmed_extractions_ico_re.comparator, pubmed_extractions_ico_re.outcome, pubmed_extractions_ico_re.label, pubmed_extractions_ico_re.evidence, pubmed_extractions_ico_re.population, pubmed_extractions_ico_re.sample_size, pubmed_extractions_ico_re.prob_low_rob, pubmed_extractions_ico_re.low_rsg_bias,pubmed_extractions_ico_re.low_ac_bias,pubmed_extractions_ico_re.low_bpp_bias
+            # TODO add this to the database
+            #pubmed_extractions_ico_re.label,
+            #pubmed_extractions_ico_re.population,
+            #pubmed_extractions_ico_re.sample_size,
+            #pubmed_extractions.prob_low_rob,
+            #pubmed_extractions.low_rsg_bias,
+            #pubmed_extractions.low_ac_bias,
+            #pubmed_extractions.low_bpp_bias
+    query = '''
+        SELECT
+            pubmed_extractions_ico_re.pmid,
+            pubmed_extractions.title AS title,
+            pubmed_extractions.abstract as abstract,
+            pubmed_extractions_ico_re.intervention,
+            pubmed_extractions_ico_re.comparator,
+            pubmed_extractions_ico_re.outcome,
+            pubmed_extractions_ico_re.evidence,
+            pubmed_extractions.p,
+            pubmed_extractions.num_randomized,
+            pubmed_extractions.prob_lob_rob
         FROM pubmed_extractions_ico_re
         INNER JOIN search_screening_results ON pubmed_extractions_ico_re.pmid = search_screening_results.pmid
+        INNER JOIN pubmed_extractions ON pubmed_extractions.pmid = search_screening_results.pmid
         WHERE search_screening_results.topic_uid = :topic_uid
         AND search_screening_results.human_decision = "Include"
         ORDER BY search_screening_results.robot_ranking DESC
-    ''', {'topic_uid': topic_uid})
+    '''
+    print(query)
+    res = cur.execute(query, {'topic_uid': topic_uid})
     selections = res.fetchall()
     close_db(cur)
     return pmids, selections

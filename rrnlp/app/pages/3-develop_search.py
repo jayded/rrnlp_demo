@@ -51,18 +51,6 @@ print('develop_search')
 for x in ['topic_name', 'topic_uid', 'search_prompt', 'query', 'finalize']:
     print(x, st.session_state.topic_information.get(x, 'none'))
 
-#st.session_state.topic_name = st.text_input('Free text topic description', st.session_state.get('topic_name', ''))
-#st.markdown(f'Generate a search for research topic "{st.session_state.topic_information["topic_name"]}"')
-#if 'topic_uid' not in st.session_state.topic_information and (
-#        len(st.session_state.topic_name) > 0 or
-#        'query' in st.session_state
-#    ):
-#    st.session_state.topic_uid = database_utils.get_next_topic_uid(st.session_state.uid, st.session_state.topic_name, st.session_state.get('search_prompt', ''), st.session_state.get('query', ''))   
-
-#command = 'Translate the following into a Boolean search query to find relevant studies in PubMed. Do not add any explanation. Do not repeat terms. Prefer shorter queries.'
-#st.markdown(f"Enter a systematic review title or topic, it will be passed to a model with the command \"{command}\"")
-# TODO save these session information in some kind of persistence...
-#st.session_state.messages = []
 with st.form("search_form"):
     command = 'Translate the following into a Boolean search query to find relevant studies in PubMed. Do not add any explanation. Do not repeat terms. Prefer shorter queries.'
     st.markdown(f"Enter a systematic review title or topic, it will be passed to a model with the command \"{command}\"")
@@ -94,59 +82,6 @@ with st.form("search_form"):
             final=st.session_state.topic_information['finalize'])
     else:
         query = st.session_state.topic_information.get('query', None)
-#    st.session_state.topic_uid = database_utils.get_next_topic_uid(st.session_state.uid, st.session_state.topic_name, st.session_state.get('search_prompt', ''), st.session_state.get('query', ''))   
-#if "messages" not in st.session_state:
-#    st.session_state.messages = []
-#    if 'search_prompt' in st.session_state:
-#        st.session_state.messages.append({'role': 'user', 'content': st.session_state.search_prompt})
-#        if 'query' in st.session_state:
-#            st.session_state.messages.append({'role': 'assistant', 'content': st.session_state.query})
-### Display chat messages from history on app rerun
-##for message in st.session_state.messages:
-##    with st.chat_message(message["role"]):
-##        st.markdown(message["content"])
-#
-##st.text_input("Translate the following into a Boolean search query to find relevant studies in PubMed. Do not add any explanation. Do not repeat terms. Prefer shorter queries.", key="name")
-### Initialize chat history
-#
-#query = ''
-#for message in st.session_state.messages:
-#    role = message['role']
-#    content = message['content']
-#    with st.chat_message(role):
-#        st.markdown(content)
-#        if role == 'assistant':
-#            query = content
-#
-#if prompt := st.chat_input("Review topic"):
-#    # Display user message in chat message container
-#    with st.chat_message("user"):
-#        st.markdown(prompt)
-#    # Add user message to chat history
-#    st.session_state.messages.append({"role": "user", "content": prompt})
-#    print('prompt:', prompt)
-#    st.session_state.search_prompt = prompt
-#    if 'topic_name' not in st.session_state:
-#        st.session_state.topic_name = prompt
-#    if 'topic_uid' not in st.session_state:
-#        st.session_state.topic_uid = database_utils.get_next_topic_uid(st.session_state.uid, st.session_state.topic_name, st.session_state.search_prompt, st.session_state.get('query', ''))   
-#
-#    # bot response
-#    # for development
-#    #query = generate_search(prompt)
-#    query = '(statins [heart OR cardiovascular] AND ("impact" OR "effect" OR "benefit"))'
-#    # I haven't figured out how this creeps in!
-#    query = query.replace('&#', '"')
-#    query = query.replace('34;', '"')
-#    st.session_state.query = query
-#    print('query', query)
-#    with st.chat_message("assistant"):
-#        response = st.markdown(query)
-#        database_utils.write_topic_info(st.session_state.topic_uid, st.session_state.uid, st.session_state.topic_name, st.session_state.search_prompt, st.session_state.query)
-#    # Add assistant response to chat history
-#    st.session_state.messages.append({"role": "assistant", "content": query})
-#
-
 
 # TODO form change on update - how to add the pubmed cochrane filter and process changes?
 # TODO also save whether the cochrane filter was added?

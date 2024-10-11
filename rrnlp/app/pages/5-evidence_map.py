@@ -7,37 +7,32 @@ import rrnlp.app.database_utils as database_utils
 
 if 'uid' not in st.session_state:
     st.switch_page('streamlit_app.py')
-if 'topic_information' not in st.session_state or 'topic_uid' not in st.session_state.topic_information or 'topic_name' not in st.session_state.topic_information:
+if 'topic_information' not in st.session_state or 'topic_uid' not in st.session_state.topic_information or 'topic_name' not in st.session_state.topic_information or 'finalize' not in st.session_state.topic_information:
     st.switch_page('pages/2-existing_projects.py')
+
+if st.session_state.topic_information['finalize'] != 1:
+    st.switch_page('pages/4-search_results_and_screening.py')
 
 # mystery: why does the st module not...seem cooperate?
 if not st.session_state.get('loaded_config', False):
     database_utils.load_config()
 
 all_included_pmids, evidence_map = database_utils.get_auto_evidence_map_from_topic_uid(st.session_state.topic_information['topic_uid'])
+if len(evidence_map) == 0:
+    st.markdown('None of the articles selected have automatic extractions')
+    st.stop()
+
 if len(all_included_pmids) == 0:
     st.switch_page('pages/4-search_results_and_screening.py')
 evidence_map = pd.DataFrame.from_records(evidence_map)
-print(evidence_map.columns)
+st.markdown(f'Of {len(all_included_pmids)}, have extractions for {len(set(evidence_map["pmid"]))}, missing extractions for {len(all_included_pmids) - len(set(evidence_map["pmid"]))}')
+print(evidence_map.columns, len(evidence_map))
 
 
-# TODO button to auto run the extraction over the remaining pmids
-
-# TODO this shouldn't use the search, it should use the screening results
-
-#count, pmids, article_data, df = database_utils.perform_pubmed_search(search_term)
-#st.session_state.pmids = pmids
-#st.session_state.article_data_df = df
-#print('dataframe columns', df.columns)
-
-#keep_columns = ['pmid', 'human_decision', 'robot_ranking', 'title', 'abstract', 'keywords', 'mesh_headings', 'authors']
 keep_column = ['pmid', 'title', 'abstract', 'intervention', 'comparator', 'outcome', 'label', 'evidence', 'population', 'sample_size', 'prob_low_rob', 'low_rsg_bias', 'low_ac_bias', 'low_bpp_bias']
 disabled_columns = set(evidence_map.columns) - set(['human_decision'])
 # TODO consider allowing updating the screened columns
-# n.b. this needs to interact with multiple rows for the datframe
-
-pmids = set(evidence_map['pmid'])
-
+# TODO consider allowing processing of the other documents
 
 edited_df = st.data_editor(
     evidence_map, 
@@ -82,17 +77,17 @@ edited_df = st.data_editor(
             help='Automatically extracted outcome or endpoint',
             width='medium',
         ),
-        'label': st.column_config.TextColumn(
-            'Label',
-            help='Automatically classified statistical finding (sig +/-/~)',
-            width='small',
-        ),
+        #'label': st.column_config.TextColumn(
+        #    'Label',
+        #    help='Automatically classified statistical finding (sig +/-/~)',
+        #    width='small',
+        #),
         'evidence': st.column_config.TextColumn(
             'Evidence',
             help='Supporting text from the article (perhaps just abstract) for the Label',
             width='medium',
         ),
-        'population': st.column_config.TextColumn(
+        'p': st.column_config.TextColumn(
             'Population',
             help='Automatically extracted population information',
             width='medium',
@@ -104,5 +99,6 @@ edited_df = st.data_editor(
     num_rows='dynamic',
     #on_change=lambda: database_utils.insert_topic_human_screening_pubmed_results(st.session_state.topic_information['topic_uid'], dict(zip(edited_df['pmid'], edited_df['human_decision']))),
 )
+print(edited_df.columns)
 # just let the database handle changes (or lack thereof)
-database_utils.insert_topic_human_screening_pubmed_results(st.session_state.topic_information['topic_uid'], dict(zip(edited_df['pmid'], edited_df['human_decision'])))
+#database_utils.insert_topic_human_screening_pubmed_results(st.session_state.topic_information['topic_uid'], dict(zip(edited_df['pmid'], edited_df['human_decision'])))
