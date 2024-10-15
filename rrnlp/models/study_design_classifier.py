@@ -41,6 +41,9 @@ def get_models():
     for sd in study_designs.keys():
         with open(os.path.join(weights_path, f"{doi}_{sd}_lr.pck"), 'rb') as f:
             models[sd] = pickle.load(f)
+            # XXX: this is a hack! at some point the name of the loss changed, and the classifier uses the name as a check for generating probabilities.
+            if models[sd].loss == 'log':
+                models[sd].loss = 'log_loss'
 
     return models
 
