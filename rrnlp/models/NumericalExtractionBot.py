@@ -9,8 +9,7 @@ import numpy as np
 from pymilvus import MilvusClient
 import torch 
 import torch.nn.functional as F
-from transformers import AutoModel, AutoTokenizer
-from peft import AutoPeftModelForCausalLM
+from transformers import AutoModel, AutoTokenizer, AutoModelForCausalLM
 
 from rrnlp.models import get_device
 
@@ -20,8 +19,62 @@ from nltk.tokenize import sent_tokenize
 # nltk.download("punkt") # Uncomment this line if you haven't downloaded the punkt tokenizer before
 
 outcome_type_model = 'meta-llama/Meta-Llama-3.1-8B-Instruct'
+outcome_type_template = '''
+      Article: {{abstract_and_results}}
+      Do NOT provide an explanation.
+      **QUESTION:** Is the outcome of {{outcome}} from a randomized controlled trial a binary or continuous type?
+      (A) binary
+      (B) continuous
+      (C) unknown - there is insufficient information to make any inference
+      **ANSWER:**
+'''
 binary_outcomes_model = 'meta-llama/Meta-Llama-3.1-8B-Instruct'
+binary_outcomes_template = '''
+      Article: {{abstract_and_results}}
+
+      Based on the given trial article, produce a 2x2 contingency table in YAML format for the following Intervention, Comparator, and Outcome:
+      Intervention: {{intervention}}
+      Comparator: {{comparator}}
+      Outcome: {{outcome}}
+
+      The YAML format should include the fields "events" and "group_size" for only "intervention" and "comparator" but not "outcome". Example:
+      intervention:
+          events: NUMBER
+          group_size: NUMBER
+      comparator:
+          events: NUMBER
+          group_size: NUMBER
+
+      Only produce YAML response. Do NOT provide an explanation. If any of the numerical information is unavailable or not extractable or not easy to calculate, please say "x".
+      If there are numerical data for pre and post-intervention, choose the post-intervention data. If there are multiple timeframes for the outcome, choose the one closest to the outcome timepoint of interest or the very last one.
+
+      YAML:
+'''
 continuous_outcomes_model = 'meta-llama/Meta-Llama-3.1-8B-Instruct'
+continuous_outcomes_template = '''
+      Article: {{abstract_and_results}}
+
+      Based on the given trial article, what is the table of mean outcome and standard deviation in YAML format for the following Intervention, Comparator, and Outcome?
+      Intervention: {{intervention}}
+      Comparator: {{comparator}}
+      Outcome: {{outcome}}
+
+      Include the total size of each group for Intervention and Comparator.
+      The YAML format should include the fields "mean", "standard_deviation", and "group_size" for only "intervention" and "comparator" but not "outcome". Example:
+      intervention:
+          mean: NUMBER
+          standard_deviation: NUMBER
+          group_size: NUMBER
+      comparator:
+          mean: NUMBER
+          standard_deviation: NUMBER
+          group_size: NUMBER
+
+      Only produce YAML response. Do NOT provide an explanation. If any of the numerical information is unavailable or not extractable or not easy to calculate, please say "x".
+      If there are numerical data for pre and post-intervention, choose the post-intervention data. If there are multiple timeframes for the outcome, choose the one closest to the outcome timepoint of interest or the very last one.
+
+      YAML:
+'''
 
 
 def get_numerical_extractor_bot(device: str='auto') -> 'NumericalExtractorBot':
@@ -47,16 +100,19 @@ def get_numerical_extractor_bot(device: str='auto') -> 'NumericalExtractorBot':
             model=models['outcome_type'],
             tokenizer=tokenizers['outcome_type'],
             new_tokens = 15, # llama generates some extra garbage so we up the o.g. token counts a little
+            prompt_template=outcome_type_template,
         ),
-        binary_outcomes_model=NumericalExtractorBot.FindingsExtractor(
+        binary_outcomes_extractor=NumericalExtractorBot.FindingsExtractor(
             model=models['binary_outcomes'],
             tokenizer=tokenizers['binary_outcomes'],
             new_tokens = 60, # llama generates some extra garbage so we up the o.g. token counts a little
+            prompt_template=binary_outcomes_template,
         ),
-        continuous_outcomes_model=NumericalExtractorBot.FindingsExtractor(
+        continuous_outcomes_extractor=NumericalExtractorBot.FindingsExtractor(
             model=models['continuous_outcomes'],
             tokenizer=tokenizers['continuous_outcomes'],
             new_tokens = 80, # llama generates some extra garbage so we up the o.g. token counts a little
+            prompt_template=continuous_outcomes_template,
         ),
     )
 
@@ -266,14 +322,14 @@ class NumericalExtractorBot:
                     text = ti_ab['ab'] + '\n\n' + ti_ab['results']
                 else:
                     text = ti_ab['ab']
-                text = prompt_template.format(abstract_and_results=text, outcome = outcome)
+                text = prompt_template.format(abstract_and_results=text, outcome=outcome)
                 model_inputs = tokenizer.apply_chat_template(text)
             else:
                 assert False, "Must provide exactly one of pt_inputs or ti_ab"
             output = self.model.generate_output(model_inputs, max_new_tokens=self.max_new_tokens)
             outcome = _convert_character_to_string_outcome_type(outcome_predicted)
             return outcome
-        
+
         def device(self):
             return self.model.device
 
@@ -321,15 +377,18 @@ class NumericalExtractorBot:
         continuous_outcomes_extractor,
     ):
         self.outcome_type_model = outcome_type_model
-        self.binary_outcomes_extractor = binary_outcomes_exractor
-        self.continuous_outcomes_extractor = continuous_outcomes_exractor
+        self.binary_outcomes_extractor = binary_outcomes_extractor
+        self.continuous_outcomes_extractor = continuous_outcomes_extractor
 
 
     # TODO handle results sections
-    def predict_for_ab(self, ab: dict, ico_tuples: List[Dict[str, str]]) -> Tuple[str, float]:
-        #input_text = ab['ti'] + '  ' + ab['ab']
+    def predict_for_ab(self, ti_ab: dict, ico_tuples: List[Dict[str, str]]) -> Tuple[str, float]:
         # first outcome type
-        ab = ab.clone()
+        assert ti_ab is not None, 'Must provide title and abstract'
+        if len(ico_tuples) == 0:
+            return []
+
+        ico_tuples = [{k.lower(): v for k,v in ico_tuple.items()} for ico_tuple in ico_tuples]
         outcomes = set([ico_tuple['outcome'] for ico_tuple in ico_tuples])
         outcome_to_type = dict()
         for outcome in outcomes:
