@@ -383,7 +383,6 @@ class NumericalExtractorBot:
 
     # TODO handle results sections
     def predict_for_ab(self, ti_ab: dict, ico_tuples: List[Dict[str, str]]) -> Tuple[str, float]:
-        # first outcome type
         assert ti_ab is not None, 'Must provide title and abstract'
         if len(ico_tuples) == 0:
             return []
