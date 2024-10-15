@@ -7,6 +7,7 @@ Note: if you find this useful, please see:
 '''
 from typing import Dict, List, Tuple, Type
 
+import copy
 import warnings
 
 import rrnlp
@@ -63,7 +64,7 @@ class TrialReader:
         "bias_ab_bot": RoB_classifier_LR.AbsRoBBot,
         "sample_size_bot": sample_size_extractor.MLPSampleSizeClassifier,
         "study_design_bot": study_design_classifier.AbsStudyDesignBot,
-        'numerical_extraction_bot': NumericalExtractionBot.get_numerical_extractor_bot,
+        "numerical_extraction_bot": NumericalExtractionBot.get_numerical_extractor_bot,
     }
 
 
@@ -75,8 +76,13 @@ class TrialReader:
 
         self.models = {task: TrialReader.task_loaders[task](device=get_device(device)) for task in tasks}
 
-    def read_trial(self, ab: dict, process_rcts_only=True,
-                   task_list=None) -> Type[dict]:
+    def read_trial(
+            self,
+            ab: dict,
+            process_rcts_only=True,
+            task_list=None,
+            previous=None,
+        ) -> Type[dict]:
         """
         The default behaviour is that non-RCTs do not have all extractions done (to save time).
         If you wish to use all the models anyway (which might not behave entirely as expected)
@@ -86,15 +92,28 @@ class TrialReader:
         if task_list is None:
             task_list = ["rct_bot", "pico_span_bot", "punchline_bot",
                    "bias_ab_bot", "sample_size_bot"]
+        # do not modify the source list which may get re-used many times.
+        task_list = list(task_list)
 
-        return_dict = {}
-        return_dict["rct_bot"] = {"is_rct": False}
+        if previous is not None:
+            return_dict = dict(copy.deepcopy(previous))
+        else:
+            return_dict = {}
+            return_dict["rct_bot"] = {"is_rct": False}
+
+        if "numerical_extraction_bot" in task_list:
+            perform_numerical_extraction = True
+            assert 'ico_ev_bot' in task_list, "Require ICO elements to perform numerical extraction"
+            task_list.remove('numerical_extraction_bot')
+        else:
+            perform_numerical_extraction = False
 
         if process_rcts_only:
             task_list.remove('rct_bot')
             # First: is this an RCT? If not, the rest of the models do not make
             # a lot of sense so we will warn the user
-            return_dict["rct_bot"] = self.models['rct_bot'].predict_for_ab(ab)
+            if 'rct_bot' not in return_dict:
+                return_dict["rct_bot"] = self.models['rct_bot'].predict_for_ab(ab)
 
         if not return_dict["rct_bot"]["is_rct"]:
             if process_rcts_only:
@@ -105,9 +124,12 @@ class TrialReader:
                         'interpret predictions accordingly.')
 
         if (not process_rcts_only) or return_dict["rct_bot"]["is_rct"]:
-
             for task in task_list:
-                return_dict[task] = self.models[task].predict_for_ab(ab)
+                # skip the task if we have already done it
+                if task not in return_dict:
+                    return_dict[task] = self.models[task].predict_for_ab(ab)
+            if perform_numerical_extraction and 'numerical_extraction_bot' not in return_dict:
+                return_dict['numerical_extraction_bot'] = self.models['numerical_extraction_bot'].predict_for_ab(ab, return_dict['ico_ev_bot'])
 
         return return_dict
 
