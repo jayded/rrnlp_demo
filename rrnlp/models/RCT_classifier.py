@@ -16,6 +16,7 @@ import torch
 from transformers import BertForSequenceClassification
 
 import rrnlp
+# TODO this should get migrated into the place(s) it's relevant
 from rrnlp.models import encoder, get_device
 
 

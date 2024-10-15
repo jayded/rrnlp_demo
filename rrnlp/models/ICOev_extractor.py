@@ -18,8 +18,8 @@ from rrnlp.models import encoder, get_device
 
 #doi = rrnlp.models.files_needed['ev_inf_classifier']['zenodo']
 
-weights = None
-tokenizer_path = None
+weights = '/work/frink/deyoung.j/evidence_inference_seq2seq/flant5_large_somin_repro/wlabels/excess/checkpoint-3500'
+tokenizer_path = '/work/frink/deyoung.j/evidence_inference_seq2seq/flant5_large_somin_repro/wlabels/excess/checkpoint-3500'
 
 def get_ico_ev_extractor(weights: str, base_tokenizer: str, device) -> 'ICOBot':
     return ICOBot(*get_ico_ev_extractor_components(weights, base_tokenizer, device))
@@ -43,11 +43,9 @@ def get_ico_ev_extractor_components(weights: str, base_tokenizer: str, device) -
 class ICOBot:
     def __init__(
         self,
-        model: AutoModelForSeq2SeqLM,
-        tokenizer: AutoTokenizer,
+        device,
     ):
-        self.model = model
-        self.tokenizer = tokenizer
+        self.model, self.tokenizer = get_ico_ev_extractor_components(weights, tokenizer_path, device=device)
 
     def predict_for_ab(self, ab: dict) -> Tuple[str, float]:
         #input_text = ab['ti'] + '  ' + ab['ab']
@@ -55,14 +53,17 @@ class ICOBot:
         inputs = self.tokenizer(input_text, return_tensors='pt', padding=True, truncation=False).input_ids.to(self.model.device)
         outputs = self.model.generate(inputs, max_new_tokens=512, do_sample=False, decoder_input_ids=None)
         res = []
-        for (_, dev_row), output in zip([input_text], outputs):
-            out = tokenizer.decode([input_text], skip_special_tokens=True)
+        for dev_row, output in zip([input_text], outputs):
+            out = self.tokenizer.decode(output, skip_special_tokens=True)
             #print(out, dev_row.to_dict())
             try:
                 decoded = ast.literal_eval(out)
+                if len(decoded) == 0:
+                    print(f'No ICO/Evidence relations found for {dev_row["pmid"]}')
                 for production in decoded:
+                    print(f'{dev_row["pmid"]}: {production}')
                     if len(production) != 5:
-                        print(f'error parsing {production} {dev_row["pmid"]}')
+                        print(f'potential error parsing {production} {dev_row["pmid"]}')
                         continue
                     try:
                         label = production[-1].split('[LABEL]')[1].split('[OUT]')[0].strip()
@@ -71,8 +72,13 @@ class ICOBot:
                         label = 'MISSING'
                     components = ["Intervention", "Outcome", "Comparator", "Evidence", "Sentence", 'Label']
                     res.append(dict(zip(components, production)))
+                    res['label'] = label
+                    res['all'] = decoded
             except Exception as e:
-                print("Error in decoding: ", dev_row, e)
+                pass
+                print("Error in decoding: ", out)
+                print("Error in decoding: ", e)
+                print("Error in decoding: ", dev_row)
         return res
 
     def supports_gpu(self) -> bool:
