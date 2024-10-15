@@ -173,6 +173,8 @@ class MLPSampleSizeClassifier:
         else:
             return {"num_randomized": None}
 
+    def supports_gpu(self) -> bool:
+        return False
 
 def load_trained_w2v_model(path: str) -> Type[gensim.models.keyedvectors.KeyedVectors]:
     ''' Load in and return word vectors at the given path. '''

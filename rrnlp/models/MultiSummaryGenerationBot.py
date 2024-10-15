@@ -40,3 +40,9 @@ class MDSSummaryBot:
 
     def predict_for_topic(self, topic: str, pmids: List):
         pass
+
+    def supports_gpu(self) -> bool:
+        return True
+
+    def to(self, device: str):
+        self.model.to(device)

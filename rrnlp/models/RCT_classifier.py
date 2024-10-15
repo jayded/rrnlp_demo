@@ -104,6 +104,11 @@ class AbsRCTBot:
     def make_preds_for_abstract(self, ti_and_abs: str) -> float:
         self.predict_for_doc(ti_and_abs)
 
+    def supports_gpu(self) -> bool:
+        return True
+
+    def to(self, device: str):
+        self.RCT_model.to(device)
 
 ###
 # e.g.

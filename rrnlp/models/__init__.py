@@ -22,6 +22,8 @@ def get_device(device='auto'):
             return torch.cuda.current_device()
         else:
             raise Exception('requested a GPU but none available!')
+    elif 'dynamic' == device:
+        return torch.device('cpu')
     else:
         return torch.device(device)
 

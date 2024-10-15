@@ -60,6 +60,8 @@ class AbsRoBBot:
         
         return {"prob_low_rob": probs[0]}
 
+    def supports_gpu(self) -> bool:
+        return False
 
 
 ###

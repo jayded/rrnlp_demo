@@ -76,6 +76,8 @@ class AbsStudyDesignBot:
 
         return out
 
+    def supports_gpu(self) -> bool:
+        return False
 
 ###
 # e.g.

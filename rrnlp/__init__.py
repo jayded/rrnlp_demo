@@ -41,6 +41,7 @@ class ReviewBot:
             assert all([task in ReviewBot.task_loaders for task in tasks])
 
         self.models = {task: ReviewBot.task_loaders[task](device=get_device(device)) for task in tasks}
+        self.dynamically_switch_to_gpu = device == 'dynamic'
 
     def generate_search(topic: str) -> str:
         pass
@@ -75,6 +76,7 @@ class TrialReader:
             assert all([task in TrialReader.task_loaders for task in tasks])
 
         self.models = {task: TrialReader.task_loaders[task](device=get_device(device)) for task in tasks}
+        self.dynamically_switch_to_gpu = device == 'dynamic'
 
     def read_trial(
             self,
@@ -127,9 +129,17 @@ class TrialReader:
             for task in task_list:
                 # skip the task if we have already done it
                 if task not in return_dict:
+                    if self.dynamically_switch_to_gpu and self.models[task].supports_gpu():
+                        self.models[task].to('cuda')
                     return_dict[task] = self.models[task].predict_for_ab(ab)
+                    if self.dynamically_switch_to_gpu and self.models[task].supports_gpu():
+                        self.models[task].to('cpu')
             if perform_numerical_extraction and 'numerical_extraction_bot' not in return_dict:
+                if self.dynamically_switch_to_gpu and self.models['numerical_extraction_bot'].supports_gpu():
+                    self.models['numerical_extraction_bot'].to('cuda')
                 return_dict['numerical_extraction_bot'] = self.models['numerical_extraction_bot'].predict_for_ab(ab, return_dict['ico_ev_bot'])
+                if self.dynamically_switch_to_gpu and self.models['numerical_extraction_bot'].supports_gpu():
+                    self.models['numerical_extraction_bot'].to('cpu')
 
         return return_dict
 

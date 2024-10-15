@@ -74,3 +74,9 @@ class ICOBot:
             except Exception as e:
                 print("Error in decoding: ", dev_row, e)
         return res
+
+    def supports_gpu(self) -> bool:
+        return True
+
+    def to(self, device: str):
+        self.model.to(device)

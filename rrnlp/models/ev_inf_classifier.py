@@ -117,6 +117,8 @@ class PunchlineExtractorBot:
         best_sent = sentences[best_sent_idx]
         return best_sent, pred_probs[best_sent_idx][1]
 
+    def supports_gpu(self) -> bool:
+        return True
 
 class InferenceBot:
     ''' Container for *inference* model which classifies punchlines. '''
@@ -144,6 +146,9 @@ class InferenceBot:
 
             return probs 
 
+    def supports_gpu(self) -> bool:
+        return True
+
 class EvInfBot:
     ''' Composes the punchline extractor and inference model. '''
     def __init__(self, device='auto'):
@@ -162,6 +167,12 @@ class EvInfBot:
         direction_probs = self.inf_bot.predict_for_sentence(pl_sent) 
         return {"punchline_text": pl_sent, "effect": self.direction_strs[np.argmax(direction_probs)]}
 
+    def supports_gpu(self) -> bool:
+        return True
+
+    def to(self, device: str):
+        self.pl_bot.to(device)
+        self.inf_bot.to(device)
 ###
 # e.g.
 # 

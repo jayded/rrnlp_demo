@@ -333,6 +333,9 @@ class NumericalExtractorBot:
         def device(self):
             return self.model.device
 
+        def to(self, device: str):
+            self.model.to(device)
+
     class FindingsExtractor:
         def __init__(
             self,
@@ -366,9 +369,12 @@ class NumericalExtractorBot:
             output = self.model.generate_output(model_inputs, max_new_tokens=self.max_new_tokens)
 
             return output
-        
+
         def device(self):
             return self.model.device
+
+        def to(self, device: str):
+            self.model.to(device)
 
     def __init__(
         self,
@@ -414,3 +420,12 @@ class NumericalExtractorBot:
                 assert False, "impossible state!"
             res.append(ico_tuple)
         return res
+
+    def supports_gpu(self) -> bool:
+        return True
+
+    def to(self, device: str):
+        # n.b. this approach is flawed since this .to() is called multiple times on the same underlying object as shared underlying extractors are, well, shared.
+        self.outcome_type_model.to(device)
+        self.binary_outcomes_extractor.to(device)
+        self.continuous_outcomes_extractor.to(device)

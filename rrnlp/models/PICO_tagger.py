@@ -172,6 +172,13 @@ class PICOBot:
             
         return preds_d
 
+    def supports_gpu(self) -> bool:
+        return True
+
+    def to(self, device: str):
+        for v in self.PICO_models.values():
+            v.to(device)
+
 
 '''
 e.g.,
