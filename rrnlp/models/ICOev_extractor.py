@@ -26,14 +26,11 @@ def get_ico_ev_extractor(weights: str, base_tokenizer: str, device) -> 'ICOBot':
 
 def get_ico_ev_extractor_components(weights: str, base_tokenizer: str, device) -> Tuple[AutoModelForSeq2SeqLM, AutoTokenizer]:
     device = get_device(device=device)
-    #dtype = torch.float32
-    #print('loading to', device)
+    print(f'Loading Model from {weights}')
     tokenizer = AutoTokenizer.from_pretrained(base_tokenizer)
     os.makedirs('./offload', exist_ok=True)
     model = AutoModelForSeq2SeqLM.from_pretrained(
         weights,
-        #'mistralai/Mistral-7B-Instruct-v0.2',
-        #is_trainable=False,
         device_map='auto',
         offload_folder='./offload',
         low_cpu_mem_usage=True,
@@ -45,7 +42,7 @@ class ICOBot:
         self,
         device,
     ):
-        self.model, self.tokenizer = get_ico_ev_extractor_components(weights, tokenizer_path, device=device)
+        self.model, self.tokenizer = get_ico_ev_extractor_components(weights=weights, base_tokenizer=tokenizer_path, device=device)
 
     def predict_for_ab(self, ab: dict) -> Tuple[str, float]:
         #input_text = ab['ti'] + '  ' + ab['ab']
@@ -55,30 +52,32 @@ class ICOBot:
         res = []
         for dev_row, output in zip([input_text], outputs):
             out = self.tokenizer.decode(output, skip_special_tokens=True)
-            #print(out, dev_row.to_dict())
             try:
                 decoded = ast.literal_eval(out)
                 if len(decoded) == 0:
-                    print(f'No ICO/Evidence relations found for {dev_row["pmid"]}')
+                    print(f'No ICO/Evidence relations found for {dev_row}')
                 for production in decoded:
-                    print(f'{dev_row["pmid"]}: {production}')
+                    print(f'{dev_row}: {production}')
                     if len(production) != 5:
-                        print(f'potential error parsing {production} {dev_row["pmid"]}')
+                        print(f'potential error parsing {production} {dev_row}')
                         continue
                     try:
                         label = production[-1].split('[LABEL]')[1].split('[OUT]')[0].strip()
                     except:
                         print(f'label parse error for {production}')
-                        label = 'MISSING'
+                        label = None
                     components = ["Intervention", "Outcome", "Comparator", "Evidence", "Sentence", 'Label']
-                    res.append(dict(zip(components, production)))
-                    res['label'] = label
-                    res['all'] = decoded
+                    ico_tuplet = dict(zip(components, production))
+                    ico_tuplet['label'] = label
+                    ico_tuplet['all'] = decoded
+                    ico_tuplet['production'] = out
+                    res.append(ico_tuplet)
             except Exception as e:
-                pass
+                res.append({'production': out})
                 print("Error in decoding: ", out)
                 print("Error in decoding: ", e)
                 print("Error in decoding: ", dev_row)
+        print(f'Final result: {res}')
         return res
 
     def supports_gpu(self) -> bool:
