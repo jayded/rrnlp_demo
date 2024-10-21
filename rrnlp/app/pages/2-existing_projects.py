@@ -29,4 +29,5 @@ if len(topic_name) > 0:
     st.session_state['topic_information']['finalize'] = 0
     st.switch_page('pages/3-develop_search.py')
 else:
+    st.markdown('Select an existing project with the left checkbox column:')
     current_topic_count = utils.projects_view()

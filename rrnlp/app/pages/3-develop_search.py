@@ -38,7 +38,9 @@ def generate_search(search_prompt):
     print(f'getting the searcher took {get_searcher_end - get_searcher_start} seconds')
     print(f'generating search for prompt {search_prompt}')
     generate_start = time.time()
-    query = searcher.generate_review_topic(search_prompt)
+    command = 'Translate the following into a Boolean search query to find relevant studies in PubMed. Do not add any explanation. Do not repeat terms. Prefer shorter queries.'
+    st.markdown('Generating the search may take a moment, now is a good time to fetch a coffee')
+    query = searcher.generate_review_topic(command + '\n"' + search_prompt + '"')
     generate_end = time.time()
     print(f'generating the query took {generate_end - generate_start} seconds')
     st.session_state.running_generate_search = False
@@ -53,7 +55,8 @@ for x in ['topic_name', 'topic_uid', 'search_prompt', 'query', 'finalize']:
 
 with st.form("search_form"):
     command = 'Translate the following into a Boolean search query to find relevant studies in PubMed. Do not add any explanation. Do not repeat terms. Prefer shorter queries.'
-    st.markdown(f"Enter a systematic review title or topic, it will be passed to a model with the command \"{command}\"")
+    st.markdown(f"Enter a systematic review title or topic to generate search terms:")
+    #st.markdown(f"Enter a systematic review title or topic, it will be passed to a model with the command \"{command}\"")
     old_search_prompt = st.session_state.topic_information.get('search_prompt', '')
     st.session_state.topic_information['search_prompt'] = st.text_area('Enter a description, e.g. a review title, for the topic you\'re interested in:', value=old_search_prompt)
     submitted = st.form_submit_button(
