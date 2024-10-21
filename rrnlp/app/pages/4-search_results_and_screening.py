@@ -28,7 +28,7 @@ query = st.session_state.topic_information.get('query', '')
 
 if st.session_state.topic_information['finalize'] != 1:
     with st.form("search"):
-        searched = st.text_area('Boolean query', value=search_query)
+        searched = st.text_area('Boolean query', value=st.session_state.topic_information.get('query', ''))
         submitted = st.form_submit_button("Search")
         if submitted:
             st.session_state.searched = searched
