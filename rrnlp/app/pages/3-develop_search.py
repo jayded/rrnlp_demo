@@ -39,7 +39,6 @@ def generate_search(search_prompt):
     print(f'generating search for prompt {search_prompt}')
     generate_start = time.time()
     command = 'Translate the following into a Boolean search query to find relevant studies in PubMed. Do not add any explanation. Do not repeat terms. Prefer shorter queries.'
-    st.markdown('Generating the search may take a moment, now is a good time to fetch a coffee')
     query = searcher.generate_review_topic(command + '\n"' + search_prompt + '"')
     generate_end = time.time()
     print(f'generating the query took {generate_end - generate_start} seconds')
@@ -65,13 +64,15 @@ with st.form("search_form"):
         #onclick=set_generating_search,
     )
     if st.session_state.get('running_generate_search', False):
-         st.stop()
+        st.markdown('Generating the search may take a moment, now is a good time to fetch a coffee')
+        st.stop()
     if submitted and len(st.session_state['topic_information']['search_prompt']) > 0:
         prompt = st.session_state.topic_information['search_prompt']
         if old_search_prompt == st.session_state.topic_information['search_prompt']:
             query = st.session_state.topic_information['query']
         else:
             with st.spinner('Generating search'):
+                st.markdown('Generating the search may take a moment, now is a good time to fetch a coffee')
                 query = generate_search(prompt)
         #query = '(statins [heart OR cardiovascular] AND ("impact" OR "effect" OR "benefit"))'
         # save!

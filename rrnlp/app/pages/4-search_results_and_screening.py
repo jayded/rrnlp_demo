@@ -69,6 +69,7 @@ if st.session_state.topic_information['finalize'] != 1:
         pmids = st.session_state.topic_information['pmids']
         article_data = st.session_state.topic_information['article_data']
         df = st.session_state.topic_information['df']
+        e = None
     # we separate these two so the search will be persisted and *then* the topic information updated; doing it the other way means any issues 
     if finalize == 1:
         st.markdown('All pmids from this search will be inserted and persisted into the database')
@@ -117,6 +118,7 @@ else:
         article_data = st.session_state.topic_information['article_data']
         df = st.session_state.topic_information['df']
 
+    e = None
 
 
 if len(search_prompt) > 0:

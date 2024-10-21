@@ -38,7 +38,7 @@ def extract_numerical_information(topic_uid):
     previous_extracted_types = set([(row['pmid'], row['intervention'], row['comparator'], row['outcome']) for row in previous_extractions])
 
     extractions = []
-    for row in evidence_map.to_dict(orient='records')):
+    for row in evidence_map.to_dict(orient='records'):
         extraction_tuple = (row['pmid'], row['intervention'], row['comparator'], row['outcome'])
         if row in previous_extractions:
             continue
