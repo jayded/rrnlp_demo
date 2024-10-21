@@ -77,6 +77,26 @@ def get_topic_to_pubmed_converter(weights, tokenizer, device) -> Tuple[AutoModel
     return model, tokenizer
 
 
+# I'm not actually convinced that these are any faster (or substantially so) than just running a torch model.
+def get_llama_cpp_bot(model_path='/data/ei_demo/llama.cpp/gaelen_model.ggml'):
+    from llama_cpp import Llama
+    llm = Llama(model_path=model_path)
+    return LlamaCppPubmedQueryGeneratorBot(llm)
+
+class LlamaCppPubmedQueryGeneratorBot:
+
+    def __init__(self, llm):
+        self.llm = llm
+
+    def generate_review_topic(self, review_topic: str) -> str:
+        res = self.llm(review_topic, max_tokens=300)
+        text = res['choices'][0]['text']
+        text = text.replace('[/INST]', '')
+        text = text.strip()
+        print(res, text)
+        return text
+
+
 class PubmedQueryGeneratorBot:
     
     def __init__(
