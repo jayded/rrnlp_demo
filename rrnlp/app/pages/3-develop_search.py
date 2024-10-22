@@ -113,4 +113,5 @@ if len(st.session_state.topic_information.get('search_text', '')) > 0 and len(st
                 generated_query=st.session_state.topic_information['generated_query'],
                 final=st.session_state.topic_information['final'],
             )
+            st.session_state.topic_information['execute_search'] = True
             st.switch_page('pages/4-search_results_and_screening.py')

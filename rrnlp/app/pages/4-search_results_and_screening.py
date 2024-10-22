@@ -52,8 +52,9 @@ if st.session_state.topic_information['final'] != 1:
     else:
         finalize = 0
 
-    if submitted_search and search_query != st.session_state.topic_information.get('last_searched', ''):
-        count, pmids, article_data, df, e = database_utils.perform_pubmed_search(search_query + added_filter, st.session_state.topic_information['topic_uid'], persist=0, run_ranker=run_ranker)
+    if (submitted_search or st.session_state.topic_information.get('execute_search', False)) \
+        and (search_query != st.session_state.topic_information.get('last_searched', '') or 'df' not in st.session_state.topic_information):
+        count, pmids, article_data, df, e = database_utils.perform_pubmed_search(search_query + added_filter, st.session_state.topic_information['topic_uid'], persist=0, run_ranker=run_ranker, fetch_all_by_date=True)
         st.session_state.topic_information['count'] = count
         st.session_state.topic_information['pmids'] = pmids
         st.session_state.topic_information['article_data'] = article_data
@@ -61,6 +62,7 @@ if st.session_state.topic_information['final'] != 1:
         st.session_state.topic_information['screening_results'] = df
         st.session_state.topic_information['last_searched'] = search_query
         st.session_state.topic_information['search_query'] = search_query
+        st.session_state.topic_information['execute_search'] = False
     else:
         count = st.session_state.topic_information['count']
         pmids = st.session_state.topic_information['pmids']
@@ -77,7 +79,8 @@ if st.session_state.topic_information['final'] != 1:
             search_text=st.session_state.topic_information['search_text'],
             search_query=st.session_state.topic_information['search_query'],
             generated_query=st.session_state.topic_information['generated_query'],
-            used_cochrane_filer=st.session_state.topic_information['used_cochrane_filter'],
+            used_cochrane_filter=st.session_state.topic_information['used_cochrane_filter'],
+            used_robot_reviewer_rct_filter=0,
             final=st.session_state.topic_information['final'])
 else:
     # if we have finished development and are revisiting this page.
@@ -132,7 +135,6 @@ if len(search_text) > 0:
 
     keep_columns = ['pmid', 'human_decision', 'robot_ranking', 'titles', 'abstracts']
     df = df[keep_columns]
-    print('loaded screening results', Counter(df['human_decision']))
     if st.session_state.topic_information['final'] == 1:
         edit_columns = ['human_decision']
     else:
@@ -147,14 +149,17 @@ if len(search_text) > 0:
             pass
         if st.button('Run AutoRanker (~1 minute / 5k)?') or finetune_ranker:
             database_utils.run_robot_ranker(st.session_state.topic_information['topic_uid'])
-            count, pmids, article_data, df, e = database_utils.perform_pubmed_search(search_query, st.session_state.topic_information['topic_uid'], persist=1, run_ranker=True)
+            count, pmids, article_data, df, e = database_utils.perform_pubmed_search(search_query, st.session_state.topic_information['topic_uid'], persist=1, run_ranker=True, fetch_all_by_date=True)
             st.session_state.topic_information['last_searched'] = search_query
             st.session_state.topic_information['count'] = count
             st.session_state.topic_information['pmids'] = pmids
             st.session_state.topic_information['article_data'] = article_data
             st.session_state.topic_information['df'] = df
-    st.session_state.topic_information['screening_results'] = st.data_editor(
-        st.session_state.topic_information.get('screening_results', df),
+
+    screening_status = Counter(st.session_state.topic_information.get('screening_results', df)['human_decision'])
+    st.markdown(f'Fetched {count} documents. {screening_status["Unscreened"]} Unscreened, {screening_status["Include"]} Include, and {screening_status["Exclude"]} Exclude decisions')
+    screening_results = st.data_editor(
+        st.session_state.topic_information.get('df', df),
         column_config={
             'human_decision': st.column_config.SelectboxColumn(
                 'Screening',
@@ -189,19 +194,20 @@ if len(search_text) > 0:
     )
 
     if st.session_state.topic_information.get('final', 0) == 1:
-        print('saving screening results', Counter(st.session_state.topic_information['screening_results']['human_decision']))
+        print('saving screening results', Counter(screening_results['human_decision']))
         database_utils.insert_topic_human_screening_pubmed_results(
             st.session_state.topic_information['topic_uid'],
             dict(
                 zip(
-                    st.session_state.topic_information['screening_results']['pmid'],
-                    st.session_state.topic_information['screening_results']['human_decision']
+                    screening_results['pmid'],
+                    screening_results['human_decision']
                 )
             )
         )
+        st.session_state.topic_information['screening_results'] = screening_results
 
 
 if st.session_state.topic_information.get('final', 0) == 1 and st.button("View Evidence Map"):
     print('saving screening results post submit button', Counter(st.session_state.topic_information['screening_results']['human_decision']))
     database_utils.insert_topic_human_screening_pubmed_results(st.session_state.topic_information['topic_uid'], dict(zip(st.session_state.topic_information['screening_results']['pmid'], st.session_state.topic_information['screening_results']['human_decision'])))
-    st.switch_page('pages/5-evidence_map.py')
+    st.switch_page('pages/6-evidence_map.py')
