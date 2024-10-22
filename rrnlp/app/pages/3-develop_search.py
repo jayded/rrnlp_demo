@@ -11,10 +11,11 @@ import rrnlp.models.SearchBot as SearchBot
 if 'uid' not in st.session_state:
     st.switch_page('streamlit_app.py')
 
-if 'topic_information' not in st.session_state or 'topic_uid' not in st.session_state.topic_information or 'topic_name' not in st.session_state.topic_information:
+# this does _not_ check for a topic_uid because we don't initially have one, and don't want to until we insert one into the database
+if 'topic_information' not in st.session_state or 'topic_name' not in st.session_state.topic_information:
     st.switch_page('pages/2-existing_projects.py')
 
-if st.session_state.topic_information['finalize'] == 1:
+if st.session_state.topic_information['final'] == 1:
     st.switch_page('pages/4-search_results_and_screening.py')
 
 # load some streamlit information
@@ -30,80 +31,86 @@ get_searcher_end = time.time()
 print(f'getting the searcher took {get_searcher_end - get_searcher_start} seconds')
 
 @st.cache_data
-def generate_search(search_prompt):
+def generate_search(search_text):
     print('getting searcher')
     get_searcher_start = time.time()
     searcher = get_searcher()
     get_searcher_end = time.time()
     print(f'getting the searcher took {get_searcher_end - get_searcher_start} seconds')
-    print(f'generating search for prompt {search_prompt}')
+    print(f'generating search for prompt {search_text}')
     generate_start = time.time()
     command = 'Translate the following into a Boolean search query to find relevant studies in PubMed. Do not add any explanation. Do not repeat terms. Prefer shorter queries.'
-    query = searcher.generate_review_topic(command + '\n"' + search_prompt + '"')
+    query = searcher.generate_review_topic(command + '\n"' + search_text + '"')
     generate_end = time.time()
     print(f'generating the query took {generate_end - generate_start} seconds')
     st.session_state.running_generate_search = False
     return query
 
-def set_generating_search():
-    st.session_state.running_generate_search = True
 
 print('develop_search')
-for x in ['topic_name', 'topic_uid', 'search_prompt', 'query', 'finalize']:
+for x in ['topic_name', 'topic_uid', 'search_text', 'search_query', 'generated_query', 'used_cochrane_filter', 'used_robot_reviewer_rct_filter', 'final']:
     print(x, st.session_state.topic_information.get(x, 'none'))
 
 with st.form("search_form"):
     command = 'Translate the following into a Boolean search query to find relevant studies in PubMed. Do not add any explanation. Do not repeat terms. Prefer shorter queries.'
-    st.markdown(f"Enter a systematic review title or topic to generate search terms:")
-    #st.markdown(f"Enter a systematic review title or topic, it will be passed to a model with the command \"{command}\"")
-    old_search_prompt = st.session_state.topic_information.get('search_prompt', '')
-    st.session_state.topic_information['search_prompt'] = st.text_area('Enter a description, e.g. a review title, for the topic you\'re interested in:', value=old_search_prompt)
-    submitted = st.form_submit_button(
+
+    # generate a search / fill in the default form value with the old / existing one
+    old_search_text = st.session_state.topic_information.get('search_text', '').strip()
+    new_search_text = st.text_area('Enter a description, e.g. a review title, for the topic you\'re interested in:', value=old_search_text).strip()
+    generate_submitted = st.form_submit_button(
         "Generate Search",
         disabled=st.session_state.get('running_generate_search', False),
-        #onclick=set_generating_search,
     )
     if st.session_state.get('running_generate_search', False):
-        st.markdown('Generating the search may take a moment, now is a good time to fetch a coffee')
         st.stop()
-    if submitted and len(st.session_state['topic_information']['search_prompt']) > 0:
-        prompt = st.session_state.topic_information['search_prompt']
-        if old_search_prompt == st.session_state.topic_information['search_prompt']:
-            query = st.session_state.topic_information['query']
+    # resurrect the old query or generate a new one
+    if generate_submitted and len(new_search_text) > 0:
+        if old_search_text == new_search_text:
+            query = st.session_state.topic_information['search_query']
         else:
             with st.spinner('Generating search'):
-                st.markdown('Generating the search may take a moment, now is a good time to fetch a coffee')
-                query = generate_search(prompt)
+                st.markdown('Generating the search may take a moment, now is a good time to fetch a coffee (two)')
+                query = generate_search(new_search_text)
+                st.session_state.topic_information['generated_query'] = query
+                st.session_state.topic_information['search_text'] = new_search_text
         #query = '(statins [heart OR cardiovascular] AND ("impact" OR "effect" OR "benefit"))'
-        # save!
-        st.session_state.topic_information['query'] = query
-        database_utils.write_topic_info(
-            topic_uid=st.session_state.topic_information['topic_uid'],
+        st.session_state.topic_information['search_query'] = query
+        st.session_state.topic_information['topic_uid'] = database_utils.write_topic_info(
+            topic_uid=st.session_state.topic_information.get('topic_uid', None),
             uid=st.session_state.uid,
             topic_name=st.session_state.topic_information['topic_name'],
-            search_prompt=st.session_state.topic_information['search_prompt'],
-            query=st.session_state.topic_information['query'],
-            final=st.session_state.topic_information['finalize'])
+            search_text=st.session_state.topic_information['search_text'],
+            used_cochrane_filter=st.session_state.topic_information.get('used_cochrane_filter', 0),
+            used_robot_reviewer_rct_filter=0,
+            search_query=st.session_state.topic_information['search_query'],
+            generated_query=st.session_state.topic_information['generated_query'],
+            final=st.session_state.topic_information['final'],
+        )
     else:
-        query = st.session_state.topic_information.get('query', None)
+        query = st.session_state.topic_information.get('search_query', None)
 
-# TODO form change on update - how to add the pubmed cochrane filter and process changes?
-# TODO also save whether the cochrane filter was added?
-# TODO save the edited search separately?
-if len(st.session_state.topic_information.get('search_prompt', '')) > 0 and len(str(query)) > 0:
+
+if len(st.session_state.topic_information.get('search_text', '')) > 0 and len(str(query)) > 0:
     cochrane_filter = SearchBot.PubmedQueryGeneratorBot.rct_filter()
-    if st.checkbox(f'Add Cochrane RCT filter? {cochrane_filter}', value=st.session_state.topic_information.get('use_rct_filter', False)):
-        search_query = query + ' AND ' + cochrane_filter
-        use_rct_filter = True
+    if st.checkbox(f'Add Cochrane RCT filter? {cochrane_filter}', value=st.session_state.topic_information.get('used_cochrane_filter', 0) == 1):
+        st.session_state.topic_information['used_cochrane_filter'] = 1
     else:
-        search_query = query
-        use_rct_filter = False
+        st.session_state.topic_information['used_cochrane_filter'] = 0
     st.session_state.topic_information['run_ranker'] = st.checkbox('Run AutoRanker (~1 minue / 5k)?', value=st.session_state.topic_information.get('run_ranker', False))
     with st.form("search"):
-        searched = st.text_area('Search query', value=search_query)
-        submitted = st.form_submit_button("Perform Search")
-        if submitted:
-            st.session_state.topic_information['searched'] = searched
-            st.session_state.topic_information['base_query'] = query
-            st.session_state.topic_information['use_rct_filter'] = use_rct_filter
+        query = st.text_area('Search query', value=st.session_state.topic_information['search_query'])
+        st.session_state.topic_information['search_query'] = query
+        execute_submitted = st.form_submit_button("Perform Search")
+        if execute_submitted:
+            database_utils.write_topic_info(
+                topic_uid=st.session_state.topic_information.get('topic_uid', None),
+                uid=st.session_state.uid,
+                topic_name=st.session_state.topic_information['topic_name'],
+                search_text=st.session_state.topic_information['search_text'],
+                used_cochrane_filter=st.session_state.topic_information.get('used_cochrane_filter', 0),
+                used_robot_reviewer_rct_filter=0,
+                search_query=st.session_state.topic_information['search_query'],
+                generated_query=st.session_state.topic_information['generated_query'],
+                final=st.session_state.topic_information['final'],
+            )
             st.switch_page('pages/4-search_results_and_screening.py')

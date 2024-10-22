@@ -83,14 +83,16 @@ def projects_view():
             if not hasattr(st.session_state, 'topic_information'):
                 st.session_state['topic_information'] = {}
             # TODO use the database entry instead of the above
-            st.session_state['topic_information']['topic_name'] = selected['topic_name']
-            st.session_state['topic_information']['topic_uid'] = selected['topic_uid']
-            st.session_state['topic_information']['search_prompt'] = selected['search_text']
-            st.session_state['topic_information']['query'] = selected['search_query']
-            st.session_state['topic_information']['finalize'] = selected.get('final', 0)
+            for k, v in selected.items():
+                st.session_state['topic_information'][k] = v
+            #st.session_state['topic_information']['topic_name'] = selected['topic_name']
+            #st.session_state['topic_information']['topic_uid'] = selected['topic_uid']
+            #st.session_state['topic_information']['search_prompt'] = selected['search_text']
+            #st.session_state['topic_information']['query'] = selected['search_query']
+            #st.session_state['topic_information']['finalize'] = selected.get('final', 0)
 
 
-            if st.session_state['topic_information']['finalize'] == 1:
+            if st.session_state['topic_information']['final'] == 1:
                 st.switch_page('pages/4-search_results_and_screening.py')
             else:
                 st.switch_page('pages/3-develop_search.py')

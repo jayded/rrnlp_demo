@@ -48,25 +48,27 @@ def get_db(fancy_row_factory=True, db_path=None):
     return cur
 
 
-# TODO should this be cached?
 def close_db(db, e=None):
-    #if app.db is not None:
-    #    app.db.close()
-    #cur = g.pop('db', None)
-
     if db is not None:
         db.close()
 
 def current_topics(uid):
     cur = get_db(True)
-    res = cur.execute('''select topic_uid, topic_name, search_text, search_query, final from user_topics where uid=?''', (uid,))
+    res = cur.execute('''select topic_uid, topic_name, search_text, search_query, generated_query, final from user_topics where uid=?''', (uid,))
     all_topics = res.fetchall()
     close_db(cur)
     return all_topics
 
-
-# TODO consider distinguishing between the automatically generated query and the actually searched query
-def get_next_topic_uid(uid='', topic_name='', search_text='', query='', final=0):
+def get_next_topic_uid(
+        uid='',
+        topic_name='',
+        search_text='',
+        search_query='',
+        generated_query='',
+        used_cochrane_filter=0,
+        used_robot_reviewer_rct_filter=0,
+        final=0,
+    ):
     if uid is None or (isinstance(uid, str) and len(uid) == 0):
         assert len(topic_name) == 0, 'user id must be defined before writing any information'
         assert len(search_text) == 0, 'user id must be defined before writing any information'
@@ -74,7 +76,7 @@ def get_next_topic_uid(uid='', topic_name='', search_text='', query='', final=0)
 
     topic_name = topic_name.replace('"', "''")
     search_text = search_text.replace('"', "''")
-    query = query.replace('"', "''")
+    query = search_query.replace('"', "''")
     cur = get_db(False)
     res = cur.execute('''select MAX(topic_uid) from user_topics;''')
     res = res.fetchone()[0]
@@ -87,34 +89,58 @@ def get_next_topic_uid(uid='', topic_name='', search_text='', query='', final=0)
     if uid:
         cur.execute('''
                 INSERT INTO
-                user_topics(topic_uid, uid, topic_name, search_text, search_query, final)
-                VALUES(?, ?, ?, ?, ?, ?);
-            ''', (next_topic, uid, topic_name, search_text, query, final)
+                user_topics(topic_uid, uid, topic_name, search_text, search_query, generated_query, used_cochrane_filter, used_robot_reviewer_rct_filter, final)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?);
+            ''', (next_topic, uid, topic_name, search_text, search_query, generated_query, used_cochrane_filter, used_robot_reviewer_rct_filter, final)
         )
         cur.commit()
     close_db(cur)
     return next_topic
 
 
-# TODO should this include whether the cochrane filter got used?
-def write_topic_info(topic_uid, uid, topic_name, search_prompt, query, final):
-    cur = get_db(False)
+def write_topic_info(
+        topic_uid,
+        uid,
+        topic_name,
+        search_text,
+        search_query,
+        generated_query,
+        used_cochrane_filter,
+        used_robot_reviewer_rct_filter,
+        final,
+    ):
     topic_name = topic_name.replace('"', "''")
-    search_prompt = search_prompt.replace('"', "''")
-    query = query.replace('"', "''")
+    pt = search_text.replace('"', "''")
+    search_query = search_query.replace('"', "''")
+    generated_query = generated_query.replace('"', "''")
+    if topic_uid is None:
+        topic_uid = get_next_topic_uid(
+            uid=uid,
+            topic_name=topic_name,
+            search_text=search_text,
+            search_query=search_query,
+            generated_query=generated_query,
+            used_cochrane_filter=used_cochrane_filter,
+            used_robot_reviewer_rct_filter=used_robot_reviewer_rct_filter,
+            final=final,
+        )
+    cur = get_db(False)
     # TODO do these need to be escaped?
     cur.execute('''
-        INSERT OR REPLACE INTO user_topics(topic_uid, uid, topic_name, search_text, search_query, final)
-        VALUES(?,?,?,?,?, ?);
-    ''',(topic_uid, uid, topic_name, search_prompt, query, final))
+        INSERT OR REPLACE INTO
+        user_topics(topic_uid, uid, topic_name, search_text, search_query, generated_query, used_cochrane_filter, used_robot_reviewer_rct_filter, final)
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?);
+        ''', (topic_uid, uid, topic_name, search_text, search_query, generated_query, used_cochrane_filter, used_robot_reviewer_rct_filter, final)
+    )
     cur.commit()
     close_db(cur)
+    return topic_uid
 
 # TODO does this need a user id?
 def get_topic_info(topic_uid):
     cur = get_db(True)
     res = cur.execute('''
-        select topic_uid, uid, topic_name, search_text, search_query, final from user_topics
+        select topic_uid, uid, topic_name, search_text, search_query, generated_query, used_cochrane_filter, used_robot_reviewer_rct_filter, final from user_topics
         where topic_uid=?
     ''',(topic_uid,))
     results = res.fetchall()
@@ -168,7 +194,6 @@ def perform_pubmed_search(pubmed_query, topic_uid, persist, run_ranker=False):
 
 
     screening_results['pmid'] = screening_results['pmid'].astype('int64')
-    #print('sdf', screening_results.columns)
     assert len(set(screening_results['pmid'].tolist()) & set(map(int, pmids))) > 0
 
     # TODO this aggregation operation should happen in the db utils source function since it ties most of these elements together
@@ -181,20 +206,6 @@ def perform_pubmed_search(pubmed_query, topic_uid, persist, run_ranker=False):
 
     article_data_df = article_data_df.groupby('pmid', as_index=False).agg(lambda x: x.iloc[0]).reset_index()
 
-    #article_data_df = article_data_df.groupby('pmid', as_index=False).agg({
-    #    'pmid': 'max',
-    #    'title': 'max',
-    #    'abstract': 'max',
-    #    'pubdate': _take_longest,
-    #    'mesh_terms': _setify,
-    #    'publication_types': _setify,
-    #    'journal': _setify,
-    #    # no space after the semicolon. Also not an ideal method for joining, but close enough.
-    #    'authors': _setify,
-    #    'chemical_list': _setify,
-    #    'keywords': _setify,
-    #    'doi': lambda x: '; '.join(x),
-    #}).reset_index()
     article_data_df['pmid'] = article_data_df['pmid'].astype('int64')
     article_data_pmids = set(article_data_df['pmid'].apply(int).tolist())
     search_pmids = set(map(int, pmids))
@@ -214,7 +225,7 @@ def perform_pubmed_search(pubmed_query, topic_uid, persist, run_ranker=False):
             pmids_positions=pmids_path,
             device='cpu',
         )
-        topic = st.session_state.topic_information['search_prompt']
+        topic = st.session_state.topic_information['search_text']
         print('topic', topic)
         pmid_scores = screener.predict_for_topic(topic, list(map(str, df['pmid'].to_list())))
         pmid_scores = [(int(x[0]), x[1]) for x in pmid_scores]
@@ -228,6 +239,7 @@ def perform_pubmed_search(pubmed_query, topic_uid, persist, run_ranker=False):
         print('df samples', df[:10].to_dict(orient='records'))
         print('article_data_df samples', article_data_df[:10].to_dict(orient='records'))
     # TODO sort by screener rating
+    # TODO sort the articles with missing information to the bottom?
     return count, pmids, article_data_df, df, None
 
 
@@ -245,7 +257,6 @@ def run_robot_ranker(topic_uid):
     ''', (topic_uid,))
     pmids = res.fetchall()
     pmids = [x[0] for x in pmids]
-    #pmids = [x['pmid'] for x in pmids]
     index_choice = st.session_state.config['default_pubmed_index']
     default_weights = st.session_state.config['pubmed_indexes'][index_choice]['base_weights']
     index_path = st.session_state.config['pubmed_indexes'][index_choice]['embeddings_path']
@@ -260,9 +271,6 @@ def run_robot_ranker(topic_uid):
     )
     pmid_scores = screener.predict_for_topic(topic, pmids)
     print('scores sample', pmid_scores[:20])
-    #pmid_score_positions = screener.predict_for_topic(topic, pmids)
-    #ranked_pmids, scores, positions = zip(*pmid_score_positions)
-    #ranked_pmids, scores = zip(*(x['pmid'], x['distance'] for x in pmid_score_positions))
     ranked_pmids, scores = zip(*pmid_scores)
 
     update_list = list(zip(scores, itertools.cycle([topic_uid]), ranked_pmids))
@@ -328,9 +336,6 @@ def get_persisted_pubmed_search_and_screening_results(topic_uid):
     article_data = get_pubmed_article_data(pmids)
     article_data_df = pd.DataFrame.from_records(article_data)
     article_data_df = article_data_df.groupby('pmid', as_index=False).agg(lambda x: x.iloc[0]).reset_index()
-    #article_data_df['pmid'] = article_data_df['pmid'].astype('int64')
-    #article_data_pmids = set(article_data_df['pmid'].apply(int).tolist())
-    #search_pmids = set(map(int, pmids))
 
     screening_results['pmid'] = screening_results['pmid'].astype(str)
     article_data_df['pmid'] = article_data_df['pmid'].astype(str)
@@ -353,13 +358,7 @@ def insert_topic_human_screening_pubmed_results(topic_uid, pmid_to_human_screeni
 
 def get_pubmed_article_data(pmids: list):
     cur = get_db(True, db_path=st.session_state['pubmed_db_path'])
-        #SELECT pmid,title,abstract,pubdate,mesh_terms,publication_types,issue,pages,journal,authors,chemical_list,keywords,doi,pmc,other_id,medline_ta,nlm_unique_id,issn_linking,country,grant_ids
     print(f'loading database {st.session_state["pubmed_db_path"]} to get records for {len(pmids)} pmids')
-    #query = f'''
-    #    SELECT DISTINCT pmid,title,abstract,pubdate,mesh_terms,publication_types,journal,authors,chemical_list,keywords,doi
-    #    FROM pubmed_data
-    #    WHERE pmid IN ({','.join(map(str, pmids))})
-    #'''
     query = f'''
         SELECT DISTINCT pmid,titles,abstracts
         FROM pubmed_data

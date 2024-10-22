@@ -23,47 +23,44 @@ if not st.session_state.get('loaded_config', False):
 cochrane_filter = SearchBot.PubmedQueryGeneratorBot.rct_filter()
 
 # TODO don't use the copies when they can be avoided
-search_prompt = st.session_state.topic_information.get('search_prompt', '')
-query = st.session_state.topic_information.get('query', '')
+search_text = st.session_state.topic_information.get('search_text', '')
+search_query = st.session_state.topic_information.get('search_query', '')
 
-if st.session_state.topic_information['finalize'] != 1:
+# part one: fetch a set of pmids
+# if we are still in development
+if st.session_state.topic_information['final'] != 1:
     with st.form("search"):
-        searched = st.text_area('Boolean query', value=st.session_state.topic_information.get('query', ''))
-        submitted = st.form_submit_button("Search")
-        if submitted:
-            st.session_state.searched = searched
+        search_query = st.text_area('Boolean query', value=st.session_state.topic_information.get('search_query', ''))
+        submitted_search = st.form_submit_button("Search")
+        if submitted_search:
+            st.session_state.last_searched = search_query
 
-    if len(search_prompt) > 0 and st.checkbox(f'Add Cochrane RCT filter? {cochrane_filter}', value=st.session_state.topic_information.get('use_rct_filter', False)):
-        search_query = query + ' AND ' + cochrane_filter
+    if len(search_text) > 0 and st.checkbox(f'Add Cochrane RCT filter? {cochrane_filter}', value=st.session_state.topic_information.get('used_cochrane_filter', False)):
+        added_filter = ' AND ' + cochrane_filter
         use_rct_filter = True
-    elif len(search_prompt) > 0:
-        search_query = query
-        use_rct_filter = False
     else:
-        search_query = ''
+        added_filter = ''
         use_rct_filter = False
-    # TODO persist this
     st.session_state.topic_information['use_rct_filter'] = use_rct_filter
 
     run_ranker = st.checkbox('Run AutoRanker (~1 minute / 5k)?', value=st.session_state.topic_information.get('run_ranker', False))
 
     st.write('Click "Finalize" to finalize this search and begin screening. Once the search is finalized, no new searches may be added')
     if st.button('Finalize'):
-        st.session_state.topic_information['finalize'] = 1
+        st.session_state.topic_information['final'] = 1
         finalize = 1
     else:
         finalize = 0
 
-    # TODO don't rerun if the search is unchanged
-    if search_query != st.session_state.topic_information.get('last_searched', ''):
-        count, pmids, article_data, df, e = database_utils.perform_pubmed_search(search_query, st.session_state.topic_information['topic_uid'], persist=1, run_ranker=True)
-        #count, pmids, article_data, df = database_utils.get_persisted_pubmed_search_and_screening_results(st.session_state.topic_information['topic_uid'])
+    if submitted_search and search_query != st.session_state.topic_information.get('last_searched', ''):
+        count, pmids, article_data, df, e = database_utils.perform_pubmed_search(search_query + added_filter, st.session_state.topic_information['topic_uid'], persist=0, run_ranker=run_ranker)
         st.session_state.topic_information['count'] = count
         st.session_state.topic_information['pmids'] = pmids
         st.session_state.topic_information['article_data'] = article_data
         st.session_state.topic_information['df'] = df
         st.session_state.topic_information['screening_results'] = df
         st.session_state.topic_information['last_searched'] = search_query
+        st.session_state.topic_information['search_query'] = search_query
     else:
         count = st.session_state.topic_information['count']
         pmids = st.session_state.topic_information['pmids']
@@ -77,15 +74,14 @@ if st.session_state.topic_information['finalize'] != 1:
             topic_uid=st.session_state.topic_information['topic_uid'],
             uid=st.session_state.uid,
             topic_name=st.session_state.topic_information['topic_name'],
-            search_prompt=st.session_state.topic_information['search_prompt'],
-            query=st.session_state.topic_information['query'],
-            final=st.session_state.topic_information['finalize'])
+            search_text=st.session_state.topic_information['search_text'],
+            search_query=st.session_state.topic_information['search_query'],
+            generated_query=st.session_state.topic_information['generated_query'],
+            used_cochrane_filer=st.session_state.topic_information['used_cochrane_filter'],
+            final=st.session_state.topic_information['final'])
 else:
-    # TODO persist if the cochrane filter got used
-    if len(search_prompt) > 0 and st.session_state.topic_information.get('use_rct_filter', False):
-        search_query = query + ' AND ' + cochrane_filter
-    else:
-        search_query = query
+    # if we have finished development and are revisiting this page.
+    search_query = st.session_state.topic_information['search_query']
     st.markdown(f'Results for: {search_query}')
     st.write('No more search results can be added via pubmed searches. Add any others manually:')
     with st.form('Insert bulk screening results'):
@@ -106,13 +102,11 @@ else:
             )
     if 'df' not in st.session_state.topic_information:
         count, pmids, article_data, df = database_utils.get_persisted_pubmed_search_and_screening_results(st.session_state.topic_information['topic_uid'])
-        #st.session_state.topic_information['last_searched'] = search_query
         st.session_state.topic_information['count'] = count
         st.session_state.topic_information['pmids'] = pmids
         st.session_state.topic_information['article_data'] = article_data
         st.session_state.topic_information['df'] = df
     else:
-        #search_query = st.session_state.topic_information['last_searched']
         count = st.session_state.topic_information['count']
         pmids = st.session_state.topic_information['pmids']
         article_data = st.session_state.topic_information['article_data']
@@ -121,8 +115,9 @@ else:
     e = None
 
 
-if len(search_prompt) > 0:
-    if st.session_state.topic_information['finalize'] != 1:
+# part two: display pmids
+if len(search_text) > 0:
+    if st.session_state.topic_information['final'] != 1:
         if count == 0:
             st.markdown('Found no results for this search, generate a new search before committing to this one!')
             st.stop()
@@ -131,7 +126,6 @@ if len(search_prompt) > 0:
             st.markdown(e)
             st.stop()
     else:
-        #count, pmids, article_data, df = database_utils.get_persisted_pubmed_search_and_screening_results(st.session_state.topic_information['topic_uid'])
         if count == 0:
             st.markdown('Found no results for this search, generate a new search before committing to this one!')
             st.stop()
@@ -139,7 +133,7 @@ if len(search_prompt) > 0:
     keep_columns = ['pmid', 'human_decision', 'robot_ranking', 'titles', 'abstracts']
     df = df[keep_columns]
     print('loaded screening results', Counter(df['human_decision']))
-    if st.session_state.topic_information['finalize'] == 1:
+    if st.session_state.topic_information['final'] == 1:
         edit_columns = ['human_decision']
     else:
         st.write('To manually screen, the search strategy must be "finalized" by selecting the button above. At this point, no searches may be modified or added to this topic, and the list of pmids to screen will be frozen.')
@@ -148,7 +142,7 @@ if len(search_prompt) > 0:
     if 'screening_results' not in st.session_state.topic_information:
         st.session_state.topic_information['screening_results'] = df
 
-    if st.session_state.topic_information.get('finalize', 0) == 1:
+    if st.session_state.topic_information.get('final', 0) == 1:
         if finetune_ranker := st.button('Finetune AutoRanker'):
             pass
         if st.button('Run AutoRanker (~1 minute / 5k)?') or finetune_ranker:
@@ -159,9 +153,7 @@ if len(search_prompt) > 0:
             st.session_state.topic_information['pmids'] = pmids
             st.session_state.topic_information['article_data'] = article_data
             st.session_state.topic_information['df'] = df
-            #database_utils.run_robot_ranker(st.session_state.topic_information['topic_uid'])
     st.session_state.topic_information['screening_results'] = st.data_editor(
-        #df,
         st.session_state.topic_information.get('screening_results', df),
         column_config={
             'human_decision': st.column_config.SelectboxColumn(
@@ -194,10 +186,9 @@ if len(search_prompt) > 0:
         disabled=frozen_columns,
         hide_index=True,
         num_rows='dynamic',
-        #on_change=on_change,
     )
 
-    if st.session_state.topic_information.get('finalize', 0) == 1:
+    if st.session_state.topic_information.get('final', 0) == 1:
         print('saving screening results', Counter(st.session_state.topic_information['screening_results']['human_decision']))
         database_utils.insert_topic_human_screening_pubmed_results(
             st.session_state.topic_information['topic_uid'],
@@ -210,7 +201,7 @@ if len(search_prompt) > 0:
         )
 
 
-if st.session_state.topic_information.get('finalize', 0) == 1 and st.button("View Evidence Map"):
+if st.session_state.topic_information.get('final', 0) == 1 and st.button("View Evidence Map"):
     print('saving screening results post submit button', Counter(st.session_state.topic_information['screening_results']['human_decision']))
     database_utils.insert_topic_human_screening_pubmed_results(st.session_state.topic_information['topic_uid'], dict(zip(st.session_state.topic_information['screening_results']['pmid'], st.session_state.topic_information['screening_results']['human_decision'])))
     st.switch_page('pages/5-evidence_map.py')
