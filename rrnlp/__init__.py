@@ -97,30 +97,33 @@ class TrialReader:
         # do not modify the source list which may get re-used many times.
         task_list = list(task_list)
 
+        if process_rcts_only:
+            assert 'rct_bot' in task_list or 'rct_bot' in previous
+
         if previous is not None:
             return_dict = dict(copy.deepcopy(previous))
         else:
             return_dict = {}
-            return_dict["rct_bot"] = {"is_rct": False}
 
         if "numerical_extraction_bot" in task_list:
             perform_numerical_extraction = True
-            assert 'ico_ev_bot' in task_list, "Require ICO elements to perform numerical extraction"
+            assert 'ico_ev_bot' in task_list or 'ico_ev_bot' in return_dict, "Require ICO elements to perform numerical extraction"
             task_list.remove('numerical_extraction_bot')
         else:
             perform_numerical_extraction = False
 
-        if process_rcts_only:
+        if 'rct_bot' in task_list:
             task_list.remove('rct_bot')
             # First: is this an RCT? If not, the rest of the models do not make
             # a lot of sense so we will warn the user
             if 'rct_bot' not in return_dict:
                 return_dict["rct_bot"] = self.models['rct_bot'].predict_for_ab(ab)
 
-        if not return_dict["rct_bot"]["is_rct"]:
+        if process_rcts_only and not return_dict["rct_bot"]["is_rct"]:
             if process_rcts_only:
                 warnings.warn('''Predicted as non-RCT, so rest of models not run. Re-run
                          with `process_rcts_only=False` to get all predictions.''')
+                return return_dict
             else:
                 warnings.filterwarnings('once', 'The input does not appear to describe an RCT;'
                         'interpret predictions accordingly.')
@@ -128,7 +131,7 @@ class TrialReader:
         if (not process_rcts_only) or return_dict["rct_bot"]["is_rct"]:
             for task in task_list:
                 # skip the task if we have already done it
-                if task not in return_dict:
+                if task not in return_dict or task == 'ico_ev_bot':
                     if self.dynamically_switch_to_gpu and self.models[task].supports_gpu():
                         self.models[task].to('cuda')
                     return_dict[task] = self.models[task].predict_for_ab(ab)
