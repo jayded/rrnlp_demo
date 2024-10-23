@@ -211,3 +211,9 @@ if st.session_state.topic_information.get('final', 0) == 1 and st.button("View E
     print('saving screening results post submit button', Counter(st.session_state.topic_information['screening_results']['human_decision']))
     database_utils.insert_topic_human_screening_pubmed_results(st.session_state.topic_information['topic_uid'], dict(zip(st.session_state.topic_information['screening_results']['pmid'], st.session_state.topic_information['screening_results']['human_decision'])))
     st.switch_page('pages/6-evidence_map.py')
+
+if st.button('Start Individual Article Screening'):
+    st.switch_page('pages/5-individual_screening.py')
+
+# TODO add a linkout to the pubmed article
+# TODO reorder columns for better user experience

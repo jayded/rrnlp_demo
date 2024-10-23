@@ -451,20 +451,59 @@ def get_numerical_extractions_for_topic(topic_uid):
     close_db(cur)
     return selections
 
-def get_auto_evidence_map_from_pmids(pmids):
-    # TODO should this be joined with screening?
+def get_extractions_for_pmids(pmids):
     cur = get_db(True)
-    res = cur.executemany('''
-        SELECT pmid, title, abstract, intervention, comparator, outcome, label, evidence, population, sample_size, prob_low_rob, low_rsg_bias,low_ac_bias,low_bpp_bias
-        FROM pubmed_extractions_ico_re
-        INNER_JOIN search_screening_results USING pmid
-        WHERE pmid = ?
-        AND human_decision = 'Include'
-        ORDER BY search_screening_results.robot_ranking DESC
-    ''', pmids)
-    selections = res.fetchall()
+    pmids = '(' + ','.join(pmids) + ')'
+    query = f'''
+        SELECT
+        *
+        from pubmed_extractions_ico_re
+        WHERE pmid in {pmids}
+    '''
+    res = cur.execute(query)
+    ico_re = res.fetchall()
+    ico_re = pd.DataFrame.from_records(ico_re)
+
+    query = f'''
+        SELECT
+          mesh_terms,
+          keywords,
+          is_rct,
+          prob_rct,
+          is_rct_sensitive,
+          is_rct_balanced,
+          is_rct_precise,
+          prob_lob_rob,
+          num_randomized,
+          study_design,
+          prob_sr,
+          is_sr,
+          prob_cohort,
+          is_cohort,
+          prob_consensus,
+          is_consensus,
+          prob_ct,
+          is_ct,
+          prob_ct_protocol,
+          is_ct_protocol,
+          prob_guideline,
+          is_guideline,
+          prob_qual,
+          is_qual,
+          p,
+          p_mesh,
+          i,
+          i_mesh,
+          o,
+          o_mesh
+        from pubmed_extractions
+        WHERE pmid in {pmids}
+    '''
+    res = cur.execute(query)
+    extractions = res.fetchall()
+    extractions = pd.DataFrame.from_records(extractions)
     close_db(cur)
-    return selections
+    return ico_re, extractions
 
 if not st.session_state.get('loaded_config', False):
     load_config()
