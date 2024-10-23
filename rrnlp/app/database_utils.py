@@ -160,12 +160,12 @@ def _setify(xs):
     return '; '.join(set(parts))
 
 @st.cache_data
-def perform_pubmed_search(pubmed_query, topic_uid, persist, run_ranker=False):
+def perform_pubmed_search(pubmed_query, topic_uid, persist, run_ranker=False, fetch_all_by_date=False):
     # TODO allow reset the search results?
     # first: perform the search and get the result document ids
     try:
         pubmed_query = pubmed_query.replace("''", '"')
-        count, pmids = SearchBot.PubmedQueryGeneratorBot.execute_pubmed_search(pubmed_query, retmax=10000)
+        count, pmids = SearchBot.PubmedQueryGeneratorBot.execute_pubmed_search(pubmed_query, retmax=10000, fetch_all_by_date=fetch_all_by_date)
         pmids = set(pmids)
         count = int(count)
         print(f'retrieved {len(pmids)} pmids of {count}')

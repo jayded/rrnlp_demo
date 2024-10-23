@@ -1,12 +1,14 @@
 import os
-import sys 
+import sys
 import tempfile
 import time
+
+from datetime import date, datetime, timedelta
 from typing import Dict, List, Tuple, Union
 
-import numpy as np 
+import numpy as np
 
-import torch 
+import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import AutoPeftModelForCausalLM
 
@@ -36,9 +38,9 @@ def get_search_bot(weights=weights, tokenizer='mistralai/Mistral-7B-Instruct-v0.
     )
 
 def get_topic_to_pubmed_converter(weights, tokenizer, device) -> Tuple[AutoModelForCausalLM, AutoTokenizer]:
-    ''' 
+    '''
     Returns the 'punchline' extractor, which seeks out sentences that seem to convey
-    main findings. 
+    main findings.
     '''
     device = get_device(device=device)
     #dtype = torch.float32
@@ -73,7 +75,7 @@ def get_topic_to_pubmed_converter(weights, tokenizer, device) -> Tuple[AutoModel
     #    #use_ram_optimized_load=False,
     #).merge_and_unload()
     #model = model.to(device)
-  
+
     return model, tokenizer
 
 
@@ -89,7 +91,7 @@ class LlamaCppPubmedQueryGeneratorBot:
         self.llm = llm
 
     def generate_review_topic(self, review_topic: str) -> str:
-        res = self.llm(review_topic, max_tokens=300)
+        res = self.llm(review_topic, max_tokens=500)
         text = res['choices'][0]['text']
         text = text.replace('[/INST]', '')
         text = text.strip()
@@ -98,7 +100,7 @@ class LlamaCppPubmedQueryGeneratorBot:
 
 
 class PubmedQueryGeneratorBot:
-    
+
     def __init__(
         self,
         weights,
@@ -140,7 +142,7 @@ class PubmedQueryGeneratorBot:
     def rct_filter(cls) -> str:
         """Cochrane precision/sensitivity balanced RCT filter
 
-        See https://work.cochrane.org/pubmed for more details. Direct pubmed link: 
+        See https://work.cochrane.org/pubmed for more details. Direct pubmed link:
             https://pubmed.ncbi.nlm.nih.gov/?cmd=search&term=(randomized+controlled+trial%5Bpt%5D+OR+controlled+clinical+trial%5Bpt%5D+OR+randomized%5Btiab%5D+OR+placebo%5Btiab%5D+OR+clinical+trials+as+topic%5Bmesh%3Anoexp%5D+OR+randomly%5Btiab%5D+OR+trial%5Bti%5D+NOT+(animals%5Bmh%5D+NOT+humans+%5Bmh%5D))
         """
         return '(randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR clinical trials as topic[mesh:noexp] OR randomly[tiab] OR trial[ti] NOT (animals[mh] NOT humans [mh]))'
@@ -149,7 +151,7 @@ class PubmedQueryGeneratorBot:
     def add_rct_filter(cls, query: str) -> str:
         """Add Cochrane precision/sensitivity balanced RCT filter
 
-        See https://work.cochrane.org/pubmed for more details. Direct pubmed link: 
+        See https://work.cochrane.org/pubmed for more details. Direct pubmed link:
             https://pubmed.ncbi.nlm.nih.gov/?cmd=search&term=(randomized+controlled+trial%5Bpt%5D+OR+controlled+clinical+trial%5Bpt%5D+OR+randomized%5Btiab%5D+OR+placebo%5Btiab%5D+OR+clinical+trials+as+topic%5Bmesh%3Anoexp%5D+OR+randomly%5Btiab%5D+OR+trial%5Bti%5D+NOT+(animals%5Bmh%5D+NOT+humans+%5Bmh%5D))
         """
         # TODO check that the filter isn't already present
@@ -169,6 +171,7 @@ class PubmedQueryGeneratorBot:
             assert False
         return pmids
 
+
     @classmethod
     def execute_pubmed_search(
             cls,
@@ -176,21 +179,60 @@ class PubmedQueryGeneratorBot:
             email='deyoung.j@northeastern.edu',
             api_key=None,
             retmax=1000,
+            fetch_all_by_date=False
         ) -> Tuple[int, List[int]]:
         """Query pubmed and find PMIDs (count, list)
         """
+
+        def _fetch_pubmed_results(term, start_date, end_date):
+            handle = Entrez.esearch(db="pubmed", term=term,
+                                    mindate=start_date.strftime("%Y/%m/%d"),
+                                    maxdate=end_date.strftime("%Y/%m/%d"),
+                                    retmax=retmax)
+            record = Entrez.read(handle)
+            handle.close()
+            return int(record['Count']), record['IdList']
+
+        def _divide_and_conquer(term, start_date, end_date):
+            intervals = [(start_date, end_date)]
+            all_ids = []
+
+            while intervals:
+                current_start, current_end = intervals.pop(0)
+                count, id_list = _fetch_pubmed_results(term, current_start, current_end)
+                #print(f'Current interval {current_start} - {current_end}: {count}')
+                time.sleep(0.5)
+
+                if count <= retmax:
+                    all_ids.extend(id_list)
+                else:
+                    # Split the interval into two halves
+                    midpoint = current_start + (current_end - current_start) / 2
+                    # we're simply never going to get everything for this one
+                    if midpoint == current_start or midpoint == current_end:
+                        all_ids.extend(id_list)
+                        continue
+                    intervals.append((current_start, midpoint))
+                    intervals.append((midpoint + timedelta(days=1), current_end))
+
+            return all_ids
         # TODO return the corrected query as well?
         # TODO cache
         if email is not None:
             Entrez.email = email
         if api_key is not None:
             Entrez.api_key = api_key
-        handle = Entrez.esearch(db="pubmed", term=query, retmax=retmax)
-        record = Entrez.read(handle)
-        count = record['Count']
-        pmids = record['IdList']
-        pmids = PubmedQueryGeneratorBot._clean_pmids(pmids)
-        handle.close()
+        if fetch_all_by_date:
+            pmids = _divide_and_conquer(query, datetime(1950, 1, 1), date.today())
+            pmids = PubmedQueryGeneratorBot._clean_pmids(pmids)
+            count = len(pmids)
+        else:
+            handle = Entrez.esearch(db="pubmed", term=query, retmax=retmax)
+            record = Entrez.read(handle)
+            count = record['Count']
+            pmids = record['IdList']
+            pmids = PubmedQueryGeneratorBot._clean_pmids(pmids)
+            handle.close()
         return count, pmids
 
     #@classmethod
@@ -209,7 +251,7 @@ class PubmedQueryGeneratorBot:
     #        pmid_to_pmcid[ids['pubmed'][0]] = ids['pmc']
     #        pmcid_to_pmid[ids['pmc']] = ids['pubmed'][0]
     #    return pmid_to_pmcid, pmcid_to_pmid
-        
+
     #@classmethod
     #def fetch_article_data(
     #    cls,
@@ -237,7 +279,7 @@ class PubmedQueryGeneratorBot:
     #    #        print(e)
     #    #    time.sleep(0.05)
     #    #return res
-    #    
+    #
 
     #def fetch_nxml(pmids: Union[int, str, List[int], List[str]), email=None):
     #    """Fetch, cache articles, return map of pmid -> p
@@ -257,7 +299,7 @@ class PubmedQueryGeneratorBot:
     #        # Download NXML
     #        nxml_url = f"https://www.ncbi.nlm.nih.gov/pmc/articles/PMC{pmcid}/nxml/"
     #        nxml_response = requests.get(nxml_url)
-    #        
+    #
     #        # Save the NXML content to a file
     #        with open(f"{pmid}.nxml", 'wb') as f:
     #            f.write(nxml_response.content)

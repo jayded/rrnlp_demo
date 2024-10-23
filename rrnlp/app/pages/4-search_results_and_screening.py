@@ -54,7 +54,7 @@ if st.session_state.topic_information['final'] != 1:
 
     if (submitted_search or st.session_state.topic_information.get('execute_search', False)) \
         and (search_query != st.session_state.topic_information.get('last_searched', '') or 'df' not in st.session_state.topic_information):
-        count, pmids, article_data, df, e = database_utils.perform_pubmed_search(search_query + added_filter, st.session_state.topic_information['topic_uid'], persist=0, run_ranker=run_ranker, fetch_all_by_date=True)
+        count, pmids, article_data, df, e = database_utils.perform_pubmed_search(search_query + added_filter, st.session_state.topic_information['topic_uid'], persist=st.session_state.topic_information['final']==1, run_ranker=run_ranker, fetch_all_by_date=True)
         st.session_state.topic_information['count'] = count
         st.session_state.topic_information['pmids'] = pmids
         st.session_state.topic_information['article_data'] = article_data
