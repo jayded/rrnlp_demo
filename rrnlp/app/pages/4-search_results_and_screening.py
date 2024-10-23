@@ -94,8 +94,8 @@ else:
         exclude_pmids = st.text_area('Exclude pmids', value='', height=20)
         submitted = st.form_submit_button("Insert")
         if submitted:
-            include_pmids = list(map(str.split(','), include_pmids.split()))
-            exclude_pmids = list(map(str.split(','), exclude_pmids.split()))
+            include_pmids = list(itertools.chain.from_iterable([x.split(',') for x in include_pmids.split()]))
+            exclude_pmids = list(itertools.chain.from_iterable([x.split(',') for x in exclude_pmids.split()]))
             pmid_to_screening_result = {pmid: 'Include' for pmid in include_pmids}
             pmid_to_screening_result.update({pmid: 'Exclude' for pmid in exclude_pmids})
             database_utils.insert_topic_human_screening_pubmed_results(
@@ -198,14 +198,12 @@ if len(search_text) > 0:
 
     if st.session_state.topic_information.get('final', 0) == 1:
         print('saving screening results', Counter(screening_results['human_decision']))
+        pmids_pairs = zip(screening_results['pmid'], screening_results['human_decision'])
+        # don't bother to insert Unscreened results
+        pmids_pairs = filter(lambda x: x[1] != 'Unscreened', pmids_pairs)
         database_utils.insert_topic_human_screening_pubmed_results(
             st.session_state.topic_information['topic_uid'],
-            dict(
-                zip(
-                    screening_results['pmid'],
-                    screening_results['human_decision']
-                )
-            )
+            dict(pmids_pairs),
         )
         st.session_state.topic_information['screening_results'] = screening_results
 
