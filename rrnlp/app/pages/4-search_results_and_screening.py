@@ -54,10 +54,10 @@ if st.session_state.topic_information['final'] != 1:
 
     if (submitted_search or st.session_state.topic_information.get('execute_search', False)) \
         and (search_query != st.session_state.topic_information.get('last_searched', '') or 'df' not in st.session_state.topic_information):
-        count, pmids, article_data, df, e = database_utils.perform_pubmed_search(search_query + added_filter, st.session_state.topic_information['topic_uid'], persist=st.session_state.topic_information['final']==1, run_ranker=run_ranker, fetch_all_by_date=True)
+        count, pmids, article_data_df, df, e = database_utils.perform_pubmed_search(search_query + added_filter, st.session_state.topic_information['topic_uid'], persist=st.session_state.topic_information['final']==1, run_ranker=run_ranker, fetch_all_by_date=True)
         st.session_state.topic_information['count'] = count
         st.session_state.topic_information['pmids'] = pmids
-        st.session_state.topic_information['article_data'] = article_data
+        st.session_state.topic_information['article_data_df'] = article_data_df
         st.session_state.topic_information['df'] = df
         st.session_state.topic_information['screening_results'] = df
         st.session_state.topic_information['last_searched'] = search_query
@@ -66,7 +66,7 @@ if st.session_state.topic_information['final'] != 1:
     else:
         count = st.session_state.topic_information['count']
         pmids = st.session_state.topic_information['pmids']
-        article_data = st.session_state.topic_information['article_data']
+        article_data_df = st.session_state.topic_information['article_data_df']
         df = st.session_state.topic_information['df']
         e = None
     # we separate these two so the search will be persisted and *then* the topic information updated; doing it the other way means any issues 
@@ -103,16 +103,19 @@ else:
                 pmid_to_human_screening=pmid_to_screening_result,
                 source='manual',
             )
-    if 'df' not in st.session_state.topic_information:
-        count, pmids, article_data, df = database_utils.get_persisted_pubmed_search_and_screening_results(st.session_state.topic_information['topic_uid'])
+            # force refresh of the dataframe
+            if 'df' in st.session_state.topic_information:
+                del st.session_state.topic_information['df']
+    if 'df' not in st.session_state.topic_information or 'article_data_df' not in st.session_state.topic_information:
+        count, pmids, article_data_df, df = database_utils.get_persisted_pubmed_search_and_screening_results(st.session_state.topic_information['topic_uid'])
         st.session_state.topic_information['count'] = count
         st.session_state.topic_information['pmids'] = pmids
-        st.session_state.topic_information['article_data'] = article_data
+        st.session_state.topic_information['article_data_df'] = article_data_df
         st.session_state.topic_information['df'] = df
     else:
         count = st.session_state.topic_information['count']
         pmids = st.session_state.topic_information['pmids']
-        article_data = st.session_state.topic_information['article_data']
+        article_data_df = st.session_state.topic_information['article_data_df']
         df = st.session_state.topic_information['df']
 
     e = None
@@ -149,11 +152,11 @@ if len(search_text) > 0:
             pass
         if st.button('Run AutoRanker (~1 minute / 5k)?') or finetune_ranker:
             database_utils.run_robot_ranker(st.session_state.topic_information['topic_uid'])
-            count, pmids, article_data, df, e = database_utils.perform_pubmed_search(search_query, st.session_state.topic_information['topic_uid'], persist=1, run_ranker=True, fetch_all_by_date=True)
+            count, pmids, article_data_df, df, e = database_utils.perform_pubmed_search(search_query, st.session_state.topic_information['topic_uid'], persist=1, run_ranker=True, fetch_all_by_date=True)
             st.session_state.topic_information['last_searched'] = search_query
             st.session_state.topic_information['count'] = count
             st.session_state.topic_information['pmids'] = pmids
-            st.session_state.topic_information['article_data'] = article_data
+            st.session_state.topic_information['article_data_df'] = article_data_df
             st.session_state.topic_information['df'] = df
 
     screening_status = Counter(st.session_state.topic_information.get('screening_results', df)['human_decision'])
