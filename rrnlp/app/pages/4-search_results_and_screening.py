@@ -161,9 +161,18 @@ if len(search_text) > 0:
 
     screening_status = Counter(st.session_state.topic_information.get('screening_results', df)['human_decision'])
     st.markdown(f'Fetched {count} documents. {screening_status["Unscreened"]} Unscreened, {screening_status["Include"]} Include, and {screening_status["Exclude"]} Exclude decisions')
+    if 'index' in st.session_state.topic_information.get('df', df).columns:
+        del st.session_state.topic_information.get('df', df)['index']
+
+
     screening_results = st.data_editor(
         st.session_state.topic_information.get('df', df),
         column_config={
+            'pmid': st.column_config.TextColumn(
+                'PMID',
+                help='pubmed ID',
+                width='small',
+            ),
             'human_decision': st.column_config.SelectboxColumn(
                 'Screening',
                 help='Screen in or out this result',
@@ -194,6 +203,7 @@ if len(search_text) > 0:
         disabled=frozen_columns,
         hide_index=True,
         num_rows='dynamic',
+        use_container_width=True,
     )
 
     if st.session_state.topic_information.get('final', 0) == 1:
