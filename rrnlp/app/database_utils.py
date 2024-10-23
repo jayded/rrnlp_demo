@@ -341,7 +341,6 @@ def get_persisted_pubmed_search_and_screening_results(topic_uid):
     article_data_df['pmid'] = article_data_df['pmid'].astype(str)
     df = pd.merge(screening_results, article_data_df, on='pmid', how='outer')
     df = df.sort_values(by='robot_ranking', ascending=False, na_position='last')
-    # TODO sort by screener rating
     return len(pmids), pmids, article_data_df, df
 
 def insert_topic_human_screening_pubmed_results(topic_uid, pmid_to_human_screening: dict, source='automatic'):
