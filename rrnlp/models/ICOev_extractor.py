@@ -32,8 +32,6 @@ def get_ico_ev_extractor_components(weights: str, base_tokenizer: str, device) -
     model = AutoModelForSeq2SeqLM.from_pretrained(
         weights,
         device_map='auto',
-        offload_folder='./offload',
-        low_cpu_mem_usage=True,
     )
     return model, tokenizer
 
@@ -41,12 +39,17 @@ class ICOBot:
     def __init__(
         self,
         device,
+        prefix='',
+        postfix = "\n\nExtract all [intervention, outcome, comparator, evidence sentences, relation label between intervention and outcome wrt comparator] tuples in the medical abstract above:\n",
     ):
         self.model, self.tokenizer = get_ico_ev_extractor_components(weights=weights, base_tokenizer=tokenizer_path, device=device)
+        self.prefix = prefix
+        self.postfix = postfix
 
     def predict_for_ab(self, ab: dict) -> Tuple[str, float]:
         #input_text = ab['ti'] + '  ' + ab['ab']
         input_text = ab['ab']
+        input_text = self.prefix + input_text + self.postfix
         inputs = self.tokenizer(input_text, return_tensors='pt', padding=True, truncation=False).input_ids.to(self.model.device)
         outputs = self.model.generate(inputs, max_new_tokens=512, do_sample=False, decoder_input_ids=None)
         res = []
@@ -57,7 +60,6 @@ class ICOBot:
                 if len(decoded) == 0:
                     print(f'No ICO/Evidence relations found for {dev_row}')
                 for production in decoded:
-                    print(f'{dev_row}: {production}')
                     if len(production) != 5:
                         print(f'potential error parsing {production} {dev_row}')
                         continue
@@ -66,18 +68,16 @@ class ICOBot:
                     except:
                         print(f'label parse error for {production}')
                         label = None
-                    components = ["Intervention", "Outcome", "Comparator", "Evidence", "Sentence", 'Label']
+                    components = ["intervention", "outcome", "comparator", "cvidence", "sentence", 'label']
                     ico_tuplet = dict(zip(components, production))
                     ico_tuplet['label'] = label
-                    ico_tuplet['all'] = decoded
-                    ico_tuplet['production'] = out
+                    del ico_tuplet['sentence']
                     res.append(ico_tuplet)
             except Exception as e:
                 res.append({'production': out})
                 print("Error in decoding: ", out)
                 print("Error in decoding: ", e)
                 print("Error in decoding: ", dev_row)
-        print(f'Final result: {res}')
         return res
 
     def supports_gpu(self) -> bool:
