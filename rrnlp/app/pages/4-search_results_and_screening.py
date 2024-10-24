@@ -120,6 +120,7 @@ else:
 
     e = None
 
+# TODO: if autoranker is selected in the first search then we should be able to retain that result
 
 # part two: display pmids
 if len(search_text) > 0:
@@ -148,6 +149,7 @@ if len(search_text) > 0:
         st.session_state.topic_information['screening_results'] = df
 
     if st.session_state.topic_information.get('final', 0) == 1:
+        # TODO add a guardrail so this can't be finetuned too soon
         if finetune_ranker := st.button('Finetune AutoRanker'):
             with st.spinner('Finetuning the auto ranker and reranking'):
                 database_utils.finetune_ranker(st.session_state.topic_information['topic_uid'])
