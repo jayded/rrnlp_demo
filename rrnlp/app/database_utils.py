@@ -2,7 +2,11 @@ from collections import Counter
 from os.path import abspath, dirname, join
 from typing import List, Tuple
 
+import datetime
 import itertools
+import json
+import os
+import random
 import sqlite3
 import time
 import urllib
@@ -29,6 +33,41 @@ def load_config():
     st.session_state['pubmed_db_path'] = config['pubmed_db_path']
     # TODO verify with each of these that the user can write to this topic...
     st.session_state['loaded_config'] = True
+
+@st.cache_resource
+def load_default_screener():
+    # TODO should this be cached?
+    index_choice = st.session_state.config['default_pubmed_index']
+    default_weights = st.session_state.config['pubmed_indexes'][index_choice]['base_weights']
+    index_path = st.session_state.config['pubmed_indexes'][index_choice]['embeddings_path']
+    pmids_path = st.session_state.config['pubmed_indexes'][index_choice]['pmids_path']
+    screener = ScreenerBot.load_screenej(
+        weights=default_weights,
+        embeddings_path=index_path,
+        pmids_positions=pmids_path,
+        device='cpu',
+    )
+    return screener
+
+def _custom_screener_location(topic_uid, create=False):
+    path = os.path.join(st.session_state.config['fine_tuned_screener_home'], f'topic_{topic_uid}')
+    return path
+
+def load_screener(topic_uid, force_default=True):
+    screener_home = _custom_screener_location(topic_uid)
+    if force_default or not os.path.exists(screener_home):
+        return load_default_screener()
+    else:
+        index_choice = st.session_state.config['default_pubmed_index']
+        index_path = st.session_state.config['pubmed_indexes'][index_choice]['embeddings_path']
+        pmids_path = st.session_state.config['pubmed_indexes'][index_choice]['pmids_path']
+        screener = ScreenerBot.load_screener(
+            weights=_custom_screener_location(),
+            embeddings_path=index_path,
+            pmids_positions=pmids_path,
+            device='cpu',
+        )
+        return screener
 
 def get_db(fancy_row_factory=True, db_path=None):
 
@@ -215,17 +254,8 @@ def perform_pubmed_search(pubmed_query, topic_uid, persist, run_ranker=False, fe
     df = pd.merge(screening_results, article_data_df, on='pmid', how='outer')
     if run_ranker:
         ranking_start = time.time()
-        index_choice = st.session_state.config['default_pubmed_index']
-        default_weights = st.session_state.config['pubmed_indexes'][index_choice]['base_weights']
-        index_path = st.session_state.config['pubmed_indexes'][index_choice]['embeddings_path']
-        pmids_path = st.session_state.config['pubmed_indexes'][index_choice]['pmids_path']
-        screener = ScreenerBot.load_screener(
-            weights=default_weights,
-            embeddings_path=index_path,
-            pmids_positions=pmids_path,
-            device='cpu',
-        )
         topic = st.session_state.topic_information['search_text']
+        screener = load_screener(topic_uid)
         print('topic', topic)
         pmid_scores = screener.predict_for_topic(topic, list(map(str, df['pmid'].to_list())))
         pmid_scores = [(int(x[0]), x[1]) for x in pmid_scores]
@@ -257,18 +287,8 @@ def run_robot_ranker(topic_uid):
     ''', (topic_uid,))
     pmids = res.fetchall()
     pmids = [x[0] for x in pmids]
-    index_choice = st.session_state.config['default_pubmed_index']
-    default_weights = st.session_state.config['pubmed_indexes'][index_choice]['base_weights']
-    index_path = st.session_state.config['pubmed_indexes'][index_choice]['embeddings_path']
-    pmids_path = st.session_state.config['pubmed_indexes'][index_choice]['pmids_path']
 
-    # TODO should this be cached?
-    screener = ScreenerBot.load_screener(
-        weights=default_weights,
-        embeddings_path=index_path,
-        pmids_positions=pmids_path,
-        device='cpu',
-    )
+    screener = load_screener(topic_uid)
     pmid_scores = screener.predict_for_topic(topic, pmids)
     print('scores sample', pmid_scores[:20])
     ranked_pmids, scores = zip(*pmid_scores)
@@ -504,6 +524,41 @@ def get_extractions_for_pmids(pmids):
     extractions = pd.DataFrame.from_records(extractions)
     close_db(cur)
     return ico_re, extractions
+
+# TODO this should probably get moved into utils somehow?
+def finetune_ranker(topic_uid):
+    screener = load_screener(topic_uid, force_default=True)
+    topic_text = get_topic_info(topic_uid)
+    screening_status = fetch_pmids_and_screening_results(topic_uid)
+    status_dict = {
+        'Include': set(),
+        'Exclude': set(),
+        'Unscreened': set()
+    }
+    print(f'Status dict: {status_dict}')
+    print(f'Screening status: {screening_status}')
+    for row in screening_status:
+        status_dict[row['human_decision']].add(row['pmid'])
+    negatives = status_dict['Exclude']
+    if len(negatives) < len(status_dict['Include']):
+        random.seed(12345)
+        # TODO include other negatives if needed!
+        negatives.add(random.sample(status_dict['Unscreened'], k=len(status_dict['Include']) - len(negatives)))
+
+    output_dir = _custom_screener_location(topic_uid)
+    if os.path.exists(output_dir):
+        os.rename(output_dir, output_dir + datetime.datetime.today().strftime('%Y_%m_%d_%H_%M_%S'))
+    os.makedirs(output_dir)
+    new_screener, losses = screener.finetune_for_annotations(
+            topic=topic_text,
+            positive_ids=list(status_dict['Include']),
+            negative_ids=list(negatives),
+            clone_model=True,
+    )
+    new_screener.save_pretrained(output_dir)
+    with open(os.path.join(output_dir, 'losses.json'), 'w') as of:
+        of.write(json.dumps(losses, indent=2))
+    return new_screener
 
 if not st.session_state.get('loaded_config', False):
     load_config()
