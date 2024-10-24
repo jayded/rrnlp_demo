@@ -39,8 +39,7 @@ def generate_search(search_text):
     print(f'getting the searcher took {get_searcher_end - get_searcher_start} seconds')
     print(f'generating search for prompt {search_text}')
     generate_start = time.time()
-    command = 'Translate the following into a Boolean search query to find relevant studies in PubMed. Do not add any explanation. Do not repeat terms. Prefer shorter queries.'
-    query = searcher.generate_review_topic(command + '\n"' + search_text + '"')
+    query = searcher.generate_review_topic(search_text)
     generate_end = time.time()
     print(f'generating the query took {generate_end - generate_start} seconds')
     st.session_state.running_generate_search = False
@@ -52,7 +51,6 @@ for x in ['topic_name', 'topic_uid', 'search_text', 'search_query', 'generated_q
     print(x, st.session_state.topic_information.get(x, 'none'))
 
 with st.form("search_form"):
-    command = 'Translate the following into a Boolean search query to find relevant studies in PubMed. Do not add any explanation. Do not repeat terms. Prefer shorter queries.'
 
     # generate a search / fill in the default form value with the old / existing one
     old_search_text = st.session_state.topic_information.get('search_text', '').strip()
@@ -69,7 +67,7 @@ with st.form("search_form"):
             query = st.session_state.topic_information['search_query']
         else:
             with st.spinner('Generating search'):
-                st.markdown('Generating the search may take a moment, now is a good time to fetch a coffee (two)')
+                st.markdown('Generating the search may take a moment, now is a good time to fetch a coffee')
                 query = generate_search(new_search_text)
                 st.session_state.topic_information['generated_query'] = query
                 st.session_state.topic_information['search_text'] = new_search_text
@@ -115,3 +113,5 @@ if len(st.session_state.topic_information.get('search_text', '')) > 0 and len(st
             )
             st.session_state.topic_information['execute_search'] = True
             st.switch_page('pages/4-search_results_and_screening.py')
+
+# TODO add a linkout to the pubmed article
