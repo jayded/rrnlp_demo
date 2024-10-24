@@ -268,6 +268,13 @@ def perform_pubmed_search(pubmed_query, topic_uid, persist, run_ranker=False, fe
         df = df.sort_values(by='robot_ranking', ascending=False, na_position='last')
         print('df samples', df[:10].to_dict(orient='records'))
         print('article_data_df samples', article_data_df[:10].to_dict(orient='records'))
+        if persist:
+            update_list = list(zip(df['robot_ranking'], itertools.cycle([topic_uid]), df['pmid']))
+            cur.executemany('''
+                UPDATE search_screening_results SET robot_ranking=? WHERE topic_uid=? and pmid LIKE ?
+            ''', update_list)
+            cur.commit()
+
     # TODO sort by screener rating
     # TODO sort the articles with missing information to the bottom?
     return count, pmids, article_data_df, df, None
@@ -473,7 +480,7 @@ def get_numerical_extractions_for_topic(topic_uid):
 
 def get_extractions_for_pmids(pmids):
     cur = get_db(True)
-    pmids = '(' + ','.join(pmids) + ')'
+    pmids = '(' + ','.join(map(str, pmids)) + ')'
     query = f'''
         SELECT
         *
