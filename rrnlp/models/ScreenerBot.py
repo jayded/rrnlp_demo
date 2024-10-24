@@ -83,6 +83,12 @@ class AnnoyRanker:
         print(embeds.shape, vec.shape, distances.shape)
         return pmids, distances
 
+    def get_pmid_embeds(self, pmids: List):
+        positions = [self.pmid_to_position[pmid] for pmid in pmids]
+        embeds = [self.index.get_item_vector(position) for position in positions]
+        embeds = np.array(embeds)
+        return embeds
+
     def find_nns_for_vec(self, vec: np.array, pmids: Optional[List]=None):
         raise NotImplementedError("Not presently using this capacity of a vector index")
 
@@ -133,6 +139,7 @@ class Screener:
             print(f'Computing distances took {embedding_end - embeddings_compute_end} seconds')
         else:
             assert False
+        # todo handle zero-length lists
         res = list(zip(res_pmids, distances))
         sorted(res, key=lambda x: x[1], reverse=True)
         return res
@@ -183,8 +190,8 @@ class Screener:
             for param in model.encoder.layer[-1].parameters():
                 param.requires_grad = True
 
-        positive_embeddings = [self.embedding_index.xb.at(self.pmid_to_position[pmid]) for pmid in positive_ids]
-        negative_embeddings = [self.embedding_index.xb.at(self.pmid_to_position[pmid]) for pmid in negative_ids]
+        positive_embeddings = self.ranker.get_pmid_embeds(positive_ids)
+        negative_embeddings = self.ranker.get_pmid_embeds(negative_ids)
 
         optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 
