@@ -149,7 +149,8 @@ if len(search_text) > 0:
 
     if st.session_state.topic_information.get('final', 0) == 1:
         if finetune_ranker := st.button('Finetune AutoRanker'):
-            pass
+            with st.spinner('Finetuning the auto ranker and reranking'):
+                database_utils.finetune_ranker(st.session_state.topic_information['topic_uid'])
         if st.button('Run AutoRanker (~1 minute / 5k)?') or finetune_ranker:
             database_utils.run_robot_ranker(st.session_state.topic_information['topic_uid'])
             count, pmids, article_data_df, df, e = database_utils.perform_pubmed_search(search_query, st.session_state.topic_information['topic_uid'], persist=1, run_ranker=True, fetch_all_by_date=True)
