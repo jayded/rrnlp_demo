@@ -212,10 +212,13 @@ if len(search_text) > 0:
         pmids_pairs = zip(screening_results['pmid'], screening_results['human_decision'])
         # don't bother to insert Unscreened results
         pmids_pairs = filter(lambda x: x[1] != 'Unscreened', pmids_pairs)
+        pmid, decision = zip(*pmids_pairs)
         database_utils.insert_topic_human_screening_pubmed_results(
             st.session_state.topic_information['topic_uid'],
             dict(pmids_pairs),
         )
+        df_ = st.session_state.topic_information['df']
+        df_[df['pmid'] == pmid]['human_decision'] = decision
         st.session_state.topic_information['screening_results'] = screening_results
 
 
