@@ -41,7 +41,7 @@ def load_default_screener():
     default_weights = st.session_state.config['pubmed_indexes'][index_choice]['base_weights']
     index_path = st.session_state.config['pubmed_indexes'][index_choice]['embeddings_path']
     pmids_path = st.session_state.config['pubmed_indexes'][index_choice]['pmids_path']
-    screener = ScreenerBot.load_screenej(
+    screener = ScreenerBot.load_screener(
         weights=default_weights,
         embeddings_path=index_path,
         pmids_positions=pmids_path,
