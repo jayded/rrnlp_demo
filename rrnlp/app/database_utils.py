@@ -205,7 +205,7 @@ def perform_pubmed_search(pubmed_query, topic_uid, persist, run_ranker=False, fe
     try:
         pubmed_query = pubmed_query.replace("''", '"')
         count, pmids = SearchBot.PubmedQueryGeneratorBot.execute_pubmed_search(pubmed_query, retmax=10000, fetch_all_by_date=fetch_all_by_date)
-        pmids = set(pmids)
+        pmids = set(map(str, pmids))
         count = int(count)
         print(f'retrieved {len(pmids)} pmids of {count}')
     except urllib.error.HTTPError as e:
@@ -219,21 +219,26 @@ def perform_pubmed_search(pubmed_query, topic_uid, persist, run_ranker=False, fe
     if persist:
         existing_pmids_and_screening_results = insert_unscreened_pmids(topic_uid, pmids)
         screening_results = pd.DataFrame.from_records(existing_pmids_and_screening_results)
+        screening_results['pmid'] = screening_results['pmid'].astype(str)
     else:
         # fetch any manual insertions
         existing_pmids_and_screening_results = fetch_pmids_and_screening_results(topic_uid)
         screening_results = pd.DataFrame.from_records(existing_pmids_and_screening_results)
-        print('src', screening_results.columns)
         if len(screening_results) > 0:
+            screening_results['pmid'] = screening_results['pmid'].astype(str)
             new_pmids = pmids - set(screening_results['pmid'])
-            search_results_df = pd.DataFrame.from_records([{'pmid': pmid, 'human_decision': 'Unscreened', 'robot_ranking': None} for pmid in new_pmids])
-            screening_results = pd.concat([screening_results, search_results_df], axis=1)
+            if len(new_pmids) > 0:
+                search_results_df = pd.DataFrame.from_records([{'pmid': str(pmid), 'human_decision': 'Unscreened', 'robot_ranking': None} for pmid in new_pmids])
+                og_columns = screening_results.columns
+                assert set(screening_results.columns) == set(search_results_df.columns), str(screening_results.columns) + " " + str(search_results_df.columns)
+                screening_results = pd.concat([screening_results, search_results_df], axis=1)
         else:
             screening_results = pd.DataFrame.from_records([{'pmid': pmid, 'human_decision': 'Unscreened', 'robot_ranking': None} for pmid in pmids])
+            new_pmids = pmids
 
 
-    screening_results['pmid'] = screening_results['pmid'].astype('int64')
-    assert len(set(screening_results['pmid'].tolist()) & set(map(int, pmids))) > 0
+    pmids = screening_results['pmid']
+    print(f'Have {len(pmids)} pmids, total {type(pmids)}\n{pmids[:10]}')
 
     # TODO this aggregation operation should happen in the db utils source function since it ties most of these elements together
     # TODO this should really get pushed all the way into sqlite. it only happens because, well, pubmed has the same article multiple times (so it seems)
@@ -245,31 +250,29 @@ def perform_pubmed_search(pubmed_query, topic_uid, persist, run_ranker=False, fe
 
     article_data_df = article_data_df.groupby('pmid', as_index=False).agg(lambda x: x.iloc[0]).reset_index()
 
-    article_data_df['pmid'] = article_data_df['pmid'].astype('int64')
+    article_data_df['pmid'] = article_data_df['pmid'].astype(str)
     article_data_pmids = set(article_data_df['pmid'].apply(int).tolist())
     search_pmids = set(map(int, pmids))
     assert len(article_data_pmids & search_pmids) > 0
     assert len(article_data) > 0, f"Error in retrieving article data"
 
     df = pd.merge(screening_results, article_data_df, on='pmid', how='outer')
-    if run_ranker:
+    if run_ranker or run_ranker == 1:
         ranking_start = time.time()
         topic = st.session_state.topic_information['search_text']
         screener = load_screener(topic_uid)
         print('topic', topic)
         pmid_scores = screener.predict_for_topic(topic, list(map(str, df['pmid'].to_list())))
-        pmid_scores = [(int(x[0]), x[1]) for x in pmid_scores]
-        print('scores sample', pmid_scores[:10])
+        pmid_scores = [(str(x[0]), x[1]) for x in pmid_scores]
         pmid_scores = dict(pmid_scores)
-        df['robot_ranking'] = [pmid_scores.get(pmid, None) for pmid in df['pmid']]
+        df['robot_ranking'] = [pmid_scores.get(str(pmid), None) for pmid in df['pmid']]
         article_data_df['robot_ranking'] = [pmid_scores.get(pmid, None) for pmid in article_data_df['pmid']]
         ranking_end = time.time()
         print(f'AutoRanking took {ranking_end - ranking_start} seconds')
         df = df.sort_values(by='robot_ranking', ascending=False, na_position='last')
-        print('df samples', df[:10].to_dict(orient='records'))
-        print('article_data_df samples', article_data_df[:10].to_dict(orient='records'))
         if persist:
             update_list = list(zip(df['robot_ranking'], itertools.cycle([topic_uid]), df['pmid']))
+            cur = get_db()
             cur.executemany('''
                 UPDATE search_screening_results SET robot_ranking=? WHERE topic_uid=? and pmid LIKE ?
             ''', update_list)
@@ -335,12 +338,16 @@ def fetch_pmids_and_screening_results(topic_uid):
     close_db(cur)
     return results
 
-def insert_unscreened_pmids(topic_uid, pmids):
+def insert_unscreened_pmids(topic_uid, pmids, ranks=None):
     cur = get_db(True)
-    cur.executemany('''
-        INSERT OR REPLACE INTO search_screening_results(topic_uid, pmid) VALUES(?, ?)
-    ''', [(topic_uid, str(pmid)) for pmid in pmids])
-    cur.commit()
+    if ranks is None:
+        ranks = itertools.cycle([None])
+    pmids = list(filter(lambda x: len(x) > 0 and x.isdigit(), map(str.strip, pmids)))
+    if len(pmids) > 0:
+        cur.executemany('''
+            INSERT OR REPLACE INTO search_screening_results(topic_uid, pmid, robot_ranking) VALUES(?, ?, ?)
+        ''', [(topic_uid, str(pmid), rank) for pmid, rank in zip(pmids, ranks)])
+        cur.commit()
     res = cur.execute('''
         SELECT pmid, human_decision, robot_ranking
         FROM search_screening_results
@@ -390,7 +397,6 @@ def get_pubmed_article_data(pmids: list):
         FROM pubmed_data
         WHERE pmid IN ({','.join(map(str, pmids))})
     '''
-    #print(query)
     res = cur.execute(query)
     res = res.fetchall()
     close_db(cur)
