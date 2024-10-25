@@ -82,7 +82,7 @@ with st.form("search_form"):
             used_robot_reviewer_rct_filter=0,
             search_query=st.session_state.topic_information['search_query'],
             generated_query=st.session_state.topic_information['generated_query'],
-            final=st.session_state.topic_information['final'],
+            final=0,
         )
     else:
         query = st.session_state.topic_information.get('search_query', None)
@@ -92,8 +92,12 @@ if len(st.session_state.topic_information.get('search_text', '')) > 0 and len(st
     cochrane_filter = SearchBot.PubmedQueryGeneratorBot.rct_filter()
     if st.checkbox(f'Add Cochrane RCT filter? {cochrane_filter}', value=st.session_state.topic_information.get('used_cochrane_filter', 0) == 1):
         st.session_state.topic_information['used_cochrane_filter'] = 1
+        added_filter = ' AND ' + cochrane_filter
+        use_rct_filter = True
     else:
         st.session_state.topic_information['used_cochrane_filter'] = 0
+        added_filter = ''
+        use_rct_filter = False
     st.session_state.topic_information['run_ranker'] = st.checkbox('Run AutoRanker (~1 minue / 5k)?', value=st.session_state.topic_information.get('run_ranker', False))
     with st.form("search"):
         query = st.text_area('Search query', value=st.session_state.topic_information['search_query'])
@@ -109,9 +113,49 @@ if len(st.session_state.topic_information.get('search_text', '')) > 0 and len(st
                 used_robot_reviewer_rct_filter=0,
                 search_query=st.session_state.topic_information['search_query'],
                 generated_query=st.session_state.topic_information['generated_query'],
-                final=st.session_state.topic_information['final'],
+                final=st.session_state.topic_information.get('final', 0),
             )
             st.session_state.topic_information['execute_search'] = True
-            st.switch_page('pages/4-search_results_and_screening.py')
+            with st.spinner('Searching! This can take a moment if the search isn\'t very specific'):
+                count, pmids, article_data_df, df, e = database_utils.perform_pubmed_search(
+                    st.session_state.topic_information['search_query'] + added_filter,
+                    st.session_state.topic_information['topic_uid'],
+                    persist=False,
+                    run_ranker=st.session_state.topic_information['run_ranker'],
+                    fetch_all_by_date=False, # temporary, TODO reset to true
+                )
+                st.session_state.topic_information['count'] = count
+                st.session_state.topic_information['pmids'] = pmids
+                st.session_state.topic_information['article_data_df'] = article_data_df
+                st.session_state.topic_information['df'] = df
+                st.session_state.topic_information['screening_results'] = df
+                st.session_state.topic_information['last_searched'] = st.session_state.topic_information['search_query']
+                st.session_state.topic_information['execute_search'] = False
+
+if st.session_state.topic_information.get('df', None) is not None:
+    if st.button('Finalize'):
+        st.session_state.topic_information['final'] = 1
+        finalize = 1
+        database_utils.insert_unscreened_pmids(
+            topic_uid=st.session_state.topic_information['topic_uid'],
+            pmids=st.session_state.topic_information['df']['pmids'],
+            ranks=st.session_state.topic_information['df']['AutoRank'],
+        )
+        database_utils.write_topic_info(
+            topic_uid=st.session_state.topic_information.get('topic_uid', None),
+            uid=st.session_state.uid,
+            topic_name=st.session_state.topic_information['topic_name'],
+            search_text=st.session_state.topic_information['search_text'],
+            used_cochrane_filter=st.session_state.topic_information.get('used_cochrane_filter', 0),
+            used_robot_reviewer_rct_filter=0,
+            search_query=st.session_state.topic_information['search_query'],
+            generated_query=st.session_state.topic_information['generated_query'],
+            final=1,
+        )
+        if 'index' in df.columns:
+            del df['index']
+    else:
+        finalize = 0
+    st.dataframe(st.session_state.topic_information['df'])
 
 # TODO add a linkout to the pubmed article
