@@ -21,6 +21,9 @@ from yaml.loader import SafeLoader
 import rrnlp.models.SearchBot as SearchBot
 import rrnlp.models.ScreenerBot as ScreenerBot
 
+PRAGMA_WAL='PRAGMA journal_mode=wal;'
+PRAGMA_DEL='PRAGMA journal_model=delete;'
+
 
 def load_config():
     config_file = join(dirname(abspath(__file__)), './demo_pw.yml')
@@ -69,7 +72,7 @@ def load_screener(topic_uid, force_default=True):
         )
         return screener
 
-def get_db(fancy_row_factory=True, db_path=None):
+def get_db(fancy_row_factory=True, db_path=None, pragma_cmd=None):
 
     def namedtuple_factory(cursor, row):
         return dict(zip([x[0] for x in cursor.description], row))
@@ -84,6 +87,8 @@ def get_db(fancy_row_factory=True, db_path=None):
     )
     if fancy_row_factory:
         cur.row_factory = namedtuple_factory
+    if pragma_cmd is not None:
+        cur.execute(pragma_cmd)
     return cur
 
 
@@ -92,7 +97,7 @@ def close_db(db, e=None):
         db.close()
 
 def current_topics(uid):
-    cur = get_db(True)
+    cur = get_db(True, pragma_cmd=PRAGMA_DEL)
     res = cur.execute('''select topic_uid, topic_name, search_text, search_query, generated_query, final from user_topics where uid=?''', (uid,))
     all_topics = res.fetchall()
     close_db(cur)
@@ -116,7 +121,7 @@ def get_next_topic_uid(
     topic_name = topic_name.replace('"', "''")
     search_text = search_text.replace('"', "''")
     query = search_query.replace('"', "''")
-    cur = get_db(False)
+    cur = get_db(False, pragma_cmd=PRAGMA_DEL)
     res = cur.execute('''select MAX(topic_uid) from user_topics;''')
     res = res.fetchone()[0]
     if res is None:
@@ -163,7 +168,7 @@ def write_topic_info(
             used_robot_reviewer_rct_filter=used_robot_reviewer_rct_filter,
             final=final,
         )
-    cur = get_db(False)
+    cur = get_db(False, pragma_cmd=PRAGMA_DEL)
     # TODO do these need to be escaped?
     cur.execute('''
         INSERT OR REPLACE INTO
@@ -177,7 +182,7 @@ def write_topic_info(
 
 # TODO does this need a user id?
 def get_topic_info(topic_uid):
-    cur = get_db(True)
+    cur = get_db(True, pragma_cmd=PRAGMA_WAL)
     res = cur.execute('''
         select topic_uid, uid, topic_name, search_text, search_query, generated_query, used_cochrane_filter, used_robot_reviewer_rct_filter, final from user_topics
         where topic_uid=?
@@ -273,7 +278,7 @@ def perform_pubmed_search(pubmed_query, topic_uid, persist, run_ranker=False, fe
         df = df.sort_values(by='robot_ranking', ascending=False, na_position='last')
         if persist:
             update_list = list(zip(df['robot_ranking'], itertools.cycle([topic_uid]), df['pmid']))
-            cur = get_db()
+            cur = get_db(pragma_cmd=PRAGMA_WAL)
             cur.executemany('''
                 UPDATE search_screening_results SET robot_ranking=? WHERE topic_uid=? and pmid LIKE ?
             ''', update_list)
@@ -287,7 +292,7 @@ def perform_pubmed_search(pubmed_query, topic_uid, persist, run_ranker=False, fe
 def run_robot_ranker(topic_uid):
     # TODO active learning storage?
     start_time = time.time()
-    cur = get_db(False)
+    cur = get_db(False, pragma_cmd=PRAGMA_WAL)
     res = cur.execute('''select search_text from user_topics where topic_uid=?''', (topic_uid,))
     topic = res.fetchone()[0]
 
@@ -305,6 +310,7 @@ def run_robot_ranker(topic_uid):
     ranked_pmids, scores = zip(*pmid_scores)
 
     update_list = list(zip(scores, itertools.cycle([topic_uid]), ranked_pmids))
+    cur = get_db(False, pragma_cmd=PRAGMA_DEL)
     cur.executemany('''
         UPDATE search_screening_results SET robot_ranking=? WHERE topic_uid=? and pmid LIKE ?
     ''', update_list)
@@ -315,7 +321,7 @@ def run_robot_ranker(topic_uid):
 
 
 def get_topic_pubmed_results(topic_uid):
-    cur = get_db(True)
+    cur = get_db(True, pragma_cmd=PRAMGA_WAL)
     # TODO do these need to be escaped?
     res = cur.execute('''
         SELECT user_topics(topic_uid, pmid, human_decision, robot_ranking)
@@ -328,7 +334,7 @@ def get_topic_pubmed_results(topic_uid):
 
 
 def fetch_pmids_and_screening_results(topic_uid):
-    cur = get_db(True)
+    cur = get_db(True, pragma_cmd=PRAGMA_WAL)
     res = cur.execute('''
         SELECT pmid, human_decision, robot_ranking
         FROM search_screening_results
@@ -340,7 +346,7 @@ def fetch_pmids_and_screening_results(topic_uid):
     return results
 
 def insert_unscreened_pmids(topic_uid, pmids, ranks=None):
-    cur = get_db(True)
+    cur = get_db(True, pragma_cmd=PRAGMA_DEL)
     if ranks is None:
         ranks = itertools.cycle([None])
     pmids = list(filter(lambda x: len(x) > 0 and x.isdigit(), map(str.strip, pmids)))
@@ -379,7 +385,7 @@ def get_persisted_pubmed_search_and_screening_results(topic_uid):
     return len(pmids), pmids, article_data_df, df
 
 def insert_topic_human_screening_pubmed_results(topic_uid, pmid_to_human_screening: dict, source='automatic'):
-    cur = get_db(False)
+    cur = get_db(False, pragma_cmd=PRAGMA_DEL)
     # TODO do these need to be escaped?
     decisions = Counter(pmid_to_human_screening.values())
     print(f'attempting to insert {len(pmid_to_human_screening)}; {decisions} screening decisions for topic {topic_uid}')
@@ -391,7 +397,7 @@ def insert_topic_human_screening_pubmed_results(topic_uid, pmid_to_human_screeni
     close_db(cur)
 
 def get_pubmed_article_data(pmids: list):
-    cur = get_db(True, db_path=st.session_state['pubmed_db_path'])
+    cur = get_db(True, db_path=st.session_state['pubmed_db_path'], pragma_cmd=PRAGMA_WAL)
     print(f'loading database {st.session_state["pubmed_db_path"]} to get records for {len(pmids)} pmids')
     query = f'''
         SELECT DISTINCT pmid,titles,abstracts
@@ -405,7 +411,7 @@ def get_pubmed_article_data(pmids: list):
 
 def get_auto_evidence_map_from_topic_uid(topic_uid):
     # TODO should this be joined with screening?
-    cur = get_db(True)
+    cur = get_db(True, pragma_cmd=PRAGMA_WAL)
     query = '''
         SELECT pubmed_extractions_ico_re.pmid, pubmed_extractions_ico_re.intervention from pubmed_extractions_ico_re
         INNER JOIN search_screening_results ON pubmed_extractions_ico_re.pmid = search_screening_results.pmid
@@ -453,7 +459,7 @@ def get_auto_evidence_map_from_topic_uid(topic_uid):
     return pmids, selections
 
 def insert_numerical_extractions(extraction: List[Tuple]):
-    cur = get_db(True)
+    cur = get_db(True, pragma_cmd=PRAGMA_WAL)
     query = '''
         INSERT or REPLACE INTO pubmed_extractions_numerical(pmid, intervention, comparator, outcome, outcome_type, binary_result, continuous_result) VALUES(?,?,?,?,?,?,?)
         '''
@@ -461,7 +467,7 @@ def insert_numerical_extractions(extraction: List[Tuple]):
     cur.commit()
 
 def get_numerical_extractions_for_topic(topic_uid):
-    cur = get_db(True)
+    cur = get_db(True, pragma_cmd=PRAGMA_WAL)
     query = '''
         SELECT
             pubmed_extractions_ico_re.pmid,
@@ -486,7 +492,7 @@ def get_numerical_extractions_for_topic(topic_uid):
     return selections
 
 def get_extractions_for_pmids(pmids):
-    cur = get_db(True)
+    cur = get_db(True, pragma_cmd=PRAGMA_WAL)
     pmids = '(' + ','.join(map(str, pmids)) + ')'
     query = f'''
         SELECT
