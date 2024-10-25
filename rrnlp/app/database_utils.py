@@ -231,13 +231,14 @@ def perform_pubmed_search(pubmed_query, topic_uid, persist, run_ranker=False, fe
                 search_results_df = pd.DataFrame.from_records([{'pmid': str(pmid), 'human_decision': 'Unscreened', 'robot_ranking': None} for pmid in new_pmids])
                 og_columns = screening_results.columns
                 assert set(screening_results.columns) == set(search_results_df.columns), str(screening_results.columns) + " " + str(search_results_df.columns)
-                screening_results = pd.concat([screening_results, search_results_df], axis=1)
+                screening_results = screening_results[screening_results['pmid'].isin(new_pmids)]
+                screening_results = pd.concat([screening_results, search_results_df], axis=0)
         else:
             screening_results = pd.DataFrame.from_records([{'pmid': pmid, 'human_decision': 'Unscreened', 'robot_ranking': None} for pmid in pmids])
             new_pmids = pmids
 
 
-    pmids = screening_results['pmid']
+    pmids = screening_results['pmid'].tolist()
     print(f'Have {len(pmids)} pmids, total {type(pmids)}\n{pmids[:10]}')
 
     # TODO this aggregation operation should happen in the db utils source function since it ties most of these elements together

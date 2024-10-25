@@ -133,13 +133,15 @@ if len(st.session_state.topic_information.get('search_text', '')) > 0 and len(st
                 st.session_state.topic_information['execute_search'] = False
 
 if st.session_state.topic_information.get('df', None) is not None:
+    if 'index' in st.session_state.topic_information['df'].columns:
+        del st.session_state.topic_information['df']['index']
     if st.button('Finalize'):
         st.session_state.topic_information['final'] = 1
         finalize = 1
         database_utils.insert_unscreened_pmids(
             topic_uid=st.session_state.topic_information['topic_uid'],
-            pmids=st.session_state.topic_information['df']['pmids'],
-            ranks=st.session_state.topic_information['df']['AutoRank'],
+            pmids=st.session_state.topic_information['df']['pmid'],
+            ranks=st.session_state.topic_information['df']['robot_ranking'] if 'robot_ranking' in st.session_state.topic_information['df'].columns else None,
         )
         database_utils.write_topic_info(
             topic_uid=st.session_state.topic_information.get('topic_uid', None),
@@ -152,10 +154,42 @@ if st.session_state.topic_information.get('df', None) is not None:
             generated_query=st.session_state.topic_information['generated_query'],
             final=1,
         )
-        if 'index' in df.columns:
-            del df['index']
+        st.switch_page('pages/4-search_results_and_screening.py')
     else:
         finalize = 0
-    st.dataframe(st.session_state.topic_information['df'])
+    st.dataframe(
+        st.session_state.topic_information['df'],
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            'pmid': st.column_config.TextColumn(
+                'PMID',
+                help='pubmed ID',
+            ),
+            'human_decision': st.column_config.SelectboxColumn(
+                'Screening',
+                help='Screen in or out this result',
+                options=[
+                    'Unscreened',
+                    'Include',
+                    'Exclude'
+                ],
+            ),
+            'robot_ranking': st.column_config.NumberColumn(
+                'AutoRank',
+                help='AutoRanker Results',
+            ),
+            'titles': st.column_config.TextColumn(
+                'Title',
+                help='pubmed article title',
+                width='large',
+            ),
+            'abstracts': st.column_config.TextColumn(
+                'Abstract',
+                help='pubmed article abstract',
+                width='large',
+            ),
+        },
+    )
 
 # TODO add a linkout to the pubmed article
