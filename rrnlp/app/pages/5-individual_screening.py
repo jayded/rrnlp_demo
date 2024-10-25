@@ -24,8 +24,11 @@ if 'pmids' not in st.session_state.topic_information['current_screening'] or len
         st.session_state.topic_information['article_data_df'] = article_data_df
         st.session_state.topic_information['df'] = df
     df = st.session_state.topic_information['df']
-    df = df[df['human_decision'] == 'Unscreened']
-    st.session_state.topic_information['current_screening']['pmids'] = df['pmid'].tolist()
+    df_ = df[df['human_decision'] == 'Unscreened']
+    to_screen_pmids = df_['pmid'].tolist()
+    # remove duplicates but retain order
+    to_screen_pmids = list({x:x for x in to_screen_pmids}.keys())
+    st.session_state.topic_information['current_screening']['pmids'] = to_screen_pmids
 
 article_data_df = st.session_state.topic_information['article_data_df']
 
@@ -110,6 +113,9 @@ with column2:
         # this line is to keep state with the bigger screening dataframe. It's our (local) source of truth.
         if df is not None:
             df[df['pmid'] == st.session_state.topic_information['current_screening']['current_pmid']]['human_decision'] = decision
+        if 'screening_results' in st.session_state.topic_information:
+            del st.session_state.topic_information['screening_results']
+
         del st.session_state.topic_information['current_screening']['current_pmid']
 
     if st.button("Return to bulk screening", use_container_width=True):
