@@ -156,6 +156,10 @@ if len(pmids_pairs) > 0:
     df_[df['pmid'] == pmid]['human_decision'] = decision
     st.session_state.topic_information['screening_results'] = screening_results
 
+    # so we don't screen anything twice
+    if 'current_screening' in st.session_state.topic_information and 'screened' in st.session_state.topic_information['current_screening']:
+        del st.session_state.topic_information['current_screening']['screened']
+
 
 if st.button("View Evidence Map"):
     print('saving screening results post submit button', Counter(st.session_state.topic_information['screening_results']['human_decision']))

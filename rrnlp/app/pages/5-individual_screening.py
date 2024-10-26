@@ -17,6 +17,7 @@ if st.session_state.topic_information['final'] != 1:
 
 if 'current_screening' not in st.session_state.topic_information:
     st.session_state.topic_information['current_screening'] = {}
+if 'screened' not in st.session_state.topic_information['current_screening']:
     st.session_state.topic_information['current_screening']['screened'] = set()
 
 print('individual article screening')
@@ -76,7 +77,6 @@ with column1:
             st.session_state.topic_information['article_data_df'] = article_data_df
             st.session_state.topic_information['df'] = df
         df = st.session_state.topic_information['df']
-        st.session_state.topic_information['current_screening']['screened'].update(df[df['human_decision'] != 'Unscreened'])
         df_ = df[df['human_decision'] == 'Unscreened']
 
         to_screen_pmids = df_['pmid'].tolist()
@@ -84,6 +84,8 @@ with column1:
         to_screen_pmids = list({x:x for x in to_screen_pmids}.keys())
         st.session_state.topic_information['current_screening']['pmids'] = to_screen_pmids
 
+    df = st.session_state.topic_information['df']
+    st.session_state.topic_information['current_screening']['screened'].update(df[df['human_decision'] != 'Unscreened']['pmid'])
     article_data_df = st.session_state.topic_information['article_data_df']
 
     if 'current_pmid' in st.session_state.topic_information['current_screening'] and st.session_state.topic_information['current_screening']['current_pmid'] in st.session_state.topic_information['current_screening']['screened']:
