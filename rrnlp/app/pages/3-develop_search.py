@@ -90,17 +90,17 @@ with st.form("search_form"):
 
 if len(st.session_state.topic_information.get('search_text', '')) > 0 and len(str(query)) > 0:
     cochrane_filter = SearchBot.PubmedQueryGeneratorBot.rct_filter()
-    if st.checkbox(f'Add Cochrane RCT filter? {cochrane_filter}', value=st.session_state.topic_information.get('used_cochrane_filter', 0) == 1):
-        st.session_state.topic_information['used_cochrane_filter'] = 1
-        added_filter = ' AND ' + cochrane_filter
-        use_rct_filter = True
-    else:
-        st.session_state.topic_information['used_cochrane_filter'] = 0
-        added_filter = ''
-        use_rct_filter = False
-    st.session_state.topic_information['run_ranker'] = st.checkbox('Run AutoRanker (~1 minue / 5k)?', value=st.session_state.topic_information.get('run_ranker', False))
     with st.form("search"):
         query = st.text_area('Search query', value=st.session_state.topic_information['search_query'])
+        if st.checkbox(f'Add Cochrane RCT filter? {cochrane_filter}', value=st.session_state.topic_information.get('used_cochrane_filter', 0) == 1):
+            st.session_state.topic_information['used_cochrane_filter'] = 1
+            added_filter = ' AND ' + cochrane_filter
+            use_rct_filter = True
+        else:
+            st.session_state.topic_information['used_cochrane_filter'] = 0
+            added_filter = ''
+            use_rct_filter = False
+        st.session_state.topic_information['run_ranker'] = st.checkbox('Run AutoRanker (~1 minue / 5k)?', value=st.session_state.topic_information.get('run_ranker', False))
         st.session_state.topic_information['search_query'] = query
         execute_submitted = st.form_submit_button("Perform Search")
         if execute_submitted:
@@ -166,6 +166,7 @@ if st.session_state.topic_information.get('df', None) is not None:
                 'PMID',
                 help='pubmed ID',
             ),
+            # TODO should probably remove this?
             'human_decision': st.column_config.SelectboxColumn(
                 'Screening',
                 help='Screen in or out this result',
