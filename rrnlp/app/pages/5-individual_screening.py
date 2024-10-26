@@ -127,7 +127,6 @@ with column1:
     if len(ico_re) > 0:
         st.dataframe(ico_re)
     if len(extractions) > 0:
-        # TODO unroll the json in each of these elements
         pio_df = extractions[['p', 'i', 'o']].melt(var_name='Variable', value_name='Value')
         pio_df_rows = pio_df.to_dict(orient='records')
         pio_df_rows = filter(lambda row: row['Value'] is not None, pio_df_rows)
@@ -140,9 +139,11 @@ with column1:
             st.dataframe(pio_df.sort_values(by=['Variable', 'Value']), hide_index=True, use_container_width=True)
         # TODO delete any empty columns here?
         study_df = extractions[['prob_rct', 'is_rct_sensitive', 'is_rct_balanced', 'is_rct_precise', 'prob_lob_rob', 'num_randomized', 'study_design', 'prob_sr', 'is_sr', 'prob_cohort', 'is_cohort', 'prob_consensus', 'is_consensus', 'prob_ct', 'is_ct', 'prob_ct_protocol', 'is_ct_protocol', 'prob_guideline', 'is_guideline', 'prob_qual', 'is_qual']].melt(var_name='Variable', value_name='Value')
-        #study_df = pd.wide_to_long(extractions[['prob_rct', 'is_rct_sensitive', 'is_rct_balanced', 'is_rct_precise', 'prob_lob_rob', 'num_randomized', 'study_design', 'prob_sr', 'is_sr', 'prob_cohort', 'is_cohort', 'prob_consensus', 'is_consensus', 'prob_ct', 'is_ct', 'prob_ct_protocol', 'is_ct_protocol', 'prob_guideline', 'is_guideline', 'prob_qual', 'is_qual']])
         study_df['Value'] = study_df['Value'].apply(lambda x: f"{x:,.3f}" if isinstance(x, float) else str(x))
-        study_df = pd.DataFrame(study_df)
+        study_df = study_df.to_dict(orient='records')
+        study_df = map(frozendict.frozendict, study_df)
+        study_df = set(study_df)
+        study_df = pd.DataFrame(study_df).sort_values(by='Variable')
 
         st.dataframe(
             study_df,
