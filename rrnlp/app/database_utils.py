@@ -390,8 +390,10 @@ def insert_topic_human_screening_pubmed_results(topic_uid, pmid_to_human_screeni
     decisions = Counter(pmid_to_human_screening.values())
     print(f'attempting to insert {len(pmid_to_human_screening)}; {decisions} screening decisions for topic {topic_uid}')
     cur.executemany('''
-        INSERT OR REPLACE INTO search_screening_results(topic_uid, pmid, human_decision, source)
+        INSERT INTO search_screening_results(topic_uid, pmid, human_decision, source)
         VALUES(:ti, :pm, :hs, :src)
+        ON CONFLICT(topic_uid, pmid)
+        DO UPDATE SET human_decision=:hs
     ''', [{'hs': human, 'ti': topic_uid, 'pm': pmid, 'src': source} for (pmid, human) in pmid_to_human_screening.items()])
     cur.commit()
     close_db(cur)
