@@ -33,7 +33,7 @@ def insert(pmid, decision):
     database_utils.insert_topic_human_screening_pubmed_results(st.session_state.topic_information['topic_uid'], {pmid: decision})
     df = st.session_state.topic_information['df']
     # this line is to keep state with the bigger screening dataframe. It's our (local) source of truth.
-    df[df['pmid'] == pmid]['human_decision'] = decision
+    df.loc[df['pmid'] == pmid, 'human_decision'] = decision
 
 # Note to any future developers:
 # - the order here is important due to streamlit's execution order.
