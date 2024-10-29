@@ -9,13 +9,13 @@ st.title("Search Bot")
 # same as get_trial_reader
 @st.cache_resource
 def get_searcher():
-    return SearchBot.get_llama_cpp_bot()
-    #search_bot = SearchBot.get_search_bot(
-    #    #weights=st.config['search_bot']['model_path'],
-    #    #tokenizer=st.config['search_bot']['tokenizer'],
-    #    device='cpu',
-    #)
-    #return search_bot
+    #return SearchBot.get_llama_cpp_bot()
+    search_bot = SearchBot.get_search_bot(
+        #weights=st.config['search_bot']['model_path'],
+        #tokenizer=st.config['search_bot']['tokenizer'],
+        device='cpu',
+    )
+    return search_bot
 
 @st.cache_resource
 def get_screener():

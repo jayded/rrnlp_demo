@@ -2,7 +2,11 @@ from collections import Counter
 from os.path import abspath, dirname, join
 from typing import List, Tuple
 
+import datetime
 import itertools
+import json
+import os
+import random
 import sqlite3
 import time
 import urllib
@@ -17,6 +21,9 @@ from yaml.loader import SafeLoader
 import rrnlp.models.SearchBot as SearchBot
 import rrnlp.models.ScreenerBot as ScreenerBot
 
+PRAGMA_WAL='PRAGMA journal_mode=wal;'
+PRAGMA_DEL='PRAGMA journal_model=delete;'
+
 
 def load_config():
     config_file = join(dirname(abspath(__file__)), './demo_pw.yml')
@@ -30,7 +37,42 @@ def load_config():
     # TODO verify with each of these that the user can write to this topic...
     st.session_state['loaded_config'] = True
 
-def get_db(fancy_row_factory=True, db_path=None):
+@st.cache_resource
+def load_default_screener():
+    # TODO should this be cached?
+    index_choice = st.session_state.config['default_pubmed_index']
+    default_weights = st.session_state.config['pubmed_indexes'][index_choice]['base_weights']
+    index_path = st.session_state.config['pubmed_indexes'][index_choice]['embeddings_path']
+    pmids_path = st.session_state.config['pubmed_indexes'][index_choice]['pmids_path']
+    screener = ScreenerBot.load_screener(
+        weights=default_weights,
+        embeddings_path=index_path,
+        pmids_positions=pmids_path,
+        device='cpu',
+    )
+    return screener
+
+def _custom_screener_location(topic_uid, create=False):
+    path = os.path.join(st.session_state.config['fine_tuned_screener_home'], f'topic_{topic_uid}')
+    return path
+
+def load_screener(topic_uid, force_default=True):
+    screener_home = _custom_screener_location(topic_uid)
+    if force_default or not os.path.exists(screener_home):
+        return load_default_screener()
+    else:
+        index_choice = st.session_state.config['default_pubmed_index']
+        index_path = st.session_state.config['pubmed_indexes'][index_choice]['embeddings_path']
+        pmids_path = st.session_state.config['pubmed_indexes'][index_choice]['pmids_path']
+        screener = ScreenerBot.load_screener(
+            weights=_custom_screener_location(),
+            embeddings_path=index_path,
+            pmids_positions=pmids_path,
+            device='cpu',
+        )
+        return screener
+
+def get_db(fancy_row_factory=True, db_path=None, pragma_cmd=None):
 
     def namedtuple_factory(cursor, row):
         return dict(zip([x[0] for x in cursor.description], row))
@@ -45,6 +87,8 @@ def get_db(fancy_row_factory=True, db_path=None):
     )
     if fancy_row_factory:
         cur.row_factory = namedtuple_factory
+    if pragma_cmd is not None:
+        cur.execute(pragma_cmd)
     return cur
 
 
@@ -53,7 +97,7 @@ def close_db(db, e=None):
         db.close()
 
 def current_topics(uid):
-    cur = get_db(True)
+    cur = get_db(True, pragma_cmd=PRAGMA_DEL)
     res = cur.execute('''select topic_uid, topic_name, search_text, search_query, generated_query, final from user_topics where uid=?''', (uid,))
     all_topics = res.fetchall()
     close_db(cur)
@@ -77,7 +121,7 @@ def get_next_topic_uid(
     topic_name = topic_name.replace('"', "''")
     search_text = search_text.replace('"', "''")
     query = search_query.replace('"', "''")
-    cur = get_db(False)
+    cur = get_db(False, pragma_cmd=PRAGMA_DEL)
     res = cur.execute('''select MAX(topic_uid) from user_topics;''')
     res = res.fetchone()[0]
     if res is None:
@@ -124,7 +168,7 @@ def write_topic_info(
             used_robot_reviewer_rct_filter=used_robot_reviewer_rct_filter,
             final=final,
         )
-    cur = get_db(False)
+    cur = get_db(False, pragma_cmd=PRAGMA_DEL)
     # TODO do these need to be escaped?
     cur.execute('''
         INSERT OR REPLACE INTO
@@ -138,7 +182,7 @@ def write_topic_info(
 
 # TODO does this need a user id?
 def get_topic_info(topic_uid):
-    cur = get_db(True)
+    cur = get_db(True, pragma_cmd=PRAGMA_WAL)
     res = cur.execute('''
         select topic_uid, uid, topic_name, search_text, search_query, generated_query, used_cochrane_filter, used_robot_reviewer_rct_filter, final from user_topics
         where topic_uid=?
@@ -166,7 +210,7 @@ def perform_pubmed_search(pubmed_query, topic_uid, persist, run_ranker=False, fe
     try:
         pubmed_query = pubmed_query.replace("''", '"')
         count, pmids = SearchBot.PubmedQueryGeneratorBot.execute_pubmed_search(pubmed_query, retmax=10000, fetch_all_by_date=fetch_all_by_date)
-        pmids = set(pmids)
+        pmids = set(map(str, pmids))
         count = int(count)
         print(f'retrieved {len(pmids)} pmids of {count}')
     except urllib.error.HTTPError as e:
@@ -180,21 +224,27 @@ def perform_pubmed_search(pubmed_query, topic_uid, persist, run_ranker=False, fe
     if persist:
         existing_pmids_and_screening_results = insert_unscreened_pmids(topic_uid, pmids)
         screening_results = pd.DataFrame.from_records(existing_pmids_and_screening_results)
+        screening_results['pmid'] = screening_results['pmid'].astype(str)
     else:
         # fetch any manual insertions
         existing_pmids_and_screening_results = fetch_pmids_and_screening_results(topic_uid)
         screening_results = pd.DataFrame.from_records(existing_pmids_and_screening_results)
-        print('src', screening_results.columns)
         if len(screening_results) > 0:
+            screening_results['pmid'] = screening_results['pmid'].astype(str)
             new_pmids = pmids - set(screening_results['pmid'])
-            search_results_df = pd.DataFrame.from_records([{'pmid': pmid, 'human_decision': 'Unscreened', 'robot_ranking': None} for pmid in new_pmids])
-            screening_results = pd.concat([screening_results, search_results_df], axis=1)
+            if len(new_pmids) > 0:
+                search_results_df = pd.DataFrame.from_records([{'pmid': str(pmid), 'human_decision': 'Unscreened', 'robot_ranking': None} for pmid in new_pmids])
+                og_columns = screening_results.columns
+                assert set(screening_results.columns) == set(search_results_df.columns), str(screening_results.columns) + " " + str(search_results_df.columns)
+                screening_results = screening_results[screening_results['pmid'].isin(new_pmids)]
+                screening_results = pd.concat([screening_results, search_results_df], axis=0)
         else:
             screening_results = pd.DataFrame.from_records([{'pmid': pmid, 'human_decision': 'Unscreened', 'robot_ranking': None} for pmid in pmids])
+            new_pmids = pmids
 
 
-    screening_results['pmid'] = screening_results['pmid'].astype('int64')
-    assert len(set(screening_results['pmid'].tolist()) & set(map(int, pmids))) > 0
+    pmids = screening_results['pmid'].tolist()
+    print(f'Have {len(pmids)} pmids, total {type(pmids)}\n{pmids[:10]}')
 
     # TODO this aggregation operation should happen in the db utils source function since it ties most of these elements together
     # TODO this should really get pushed all the way into sqlite. it only happens because, well, pubmed has the same article multiple times (so it seems)
@@ -206,38 +256,34 @@ def perform_pubmed_search(pubmed_query, topic_uid, persist, run_ranker=False, fe
 
     article_data_df = article_data_df.groupby('pmid', as_index=False).agg(lambda x: x.iloc[0]).reset_index()
 
-    article_data_df['pmid'] = article_data_df['pmid'].astype('int64')
+    article_data_df['pmid'] = article_data_df['pmid'].astype(str)
     article_data_pmids = set(article_data_df['pmid'].apply(int).tolist())
     search_pmids = set(map(int, pmids))
     assert len(article_data_pmids & search_pmids) > 0
     assert len(article_data) > 0, f"Error in retrieving article data"
 
     df = pd.merge(screening_results, article_data_df, on='pmid', how='outer')
-    if run_ranker:
+    if run_ranker or run_ranker == 1:
         ranking_start = time.time()
-        index_choice = st.session_state.config['default_pubmed_index']
-        default_weights = st.session_state.config['pubmed_indexes'][index_choice]['base_weights']
-        index_path = st.session_state.config['pubmed_indexes'][index_choice]['embeddings_path']
-        pmids_path = st.session_state.config['pubmed_indexes'][index_choice]['pmids_path']
-        screener = ScreenerBot.load_screener(
-            weights=default_weights,
-            embeddings_path=index_path,
-            pmids_positions=pmids_path,
-            device='cpu',
-        )
         topic = st.session_state.topic_information['search_text']
+        screener = load_screener(topic_uid)
         print('topic', topic)
         pmid_scores = screener.predict_for_topic(topic, list(map(str, df['pmid'].to_list())))
-        pmid_scores = [(int(x[0]), x[1]) for x in pmid_scores]
-        print('scores sample', pmid_scores[:10])
+        pmid_scores = [(str(x[0]), x[1]) for x in pmid_scores]
         pmid_scores = dict(pmid_scores)
-        df['robot_ranking'] = [pmid_scores.get(pmid, None) for pmid in df['pmid']]
+        df['robot_ranking'] = [pmid_scores.get(str(pmid), None) for pmid in df['pmid']]
         article_data_df['robot_ranking'] = [pmid_scores.get(pmid, None) for pmid in article_data_df['pmid']]
         ranking_end = time.time()
         print(f'AutoRanking took {ranking_end - ranking_start} seconds')
         df = df.sort_values(by='robot_ranking', ascending=False, na_position='last')
-        print('df samples', df[:10].to_dict(orient='records'))
-        print('article_data_df samples', article_data_df[:10].to_dict(orient='records'))
+        if persist:
+            update_list = list(zip(df['robot_ranking'], itertools.cycle([topic_uid]), df['pmid']))
+            cur = get_db(pragma_cmd=PRAGMA_WAL)
+            cur.executemany('''
+                UPDATE search_screening_results SET robot_ranking=? WHERE topic_uid=? and pmid LIKE ?
+            ''', update_list)
+            cur.commit()
+
     # TODO sort by screener rating
     # TODO sort the articles with missing information to the bottom?
     return count, pmids, article_data_df, df, None
@@ -246,7 +292,7 @@ def perform_pubmed_search(pubmed_query, topic_uid, persist, run_ranker=False, fe
 def run_robot_ranker(topic_uid):
     # TODO active learning storage?
     start_time = time.time()
-    cur = get_db(False)
+    cur = get_db(False, pragma_cmd=PRAGMA_WAL)
     res = cur.execute('''select search_text from user_topics where topic_uid=?''', (topic_uid,))
     topic = res.fetchone()[0]
 
@@ -257,23 +303,14 @@ def run_robot_ranker(topic_uid):
     ''', (topic_uid,))
     pmids = res.fetchall()
     pmids = [x[0] for x in pmids]
-    index_choice = st.session_state.config['default_pubmed_index']
-    default_weights = st.session_state.config['pubmed_indexes'][index_choice]['base_weights']
-    index_path = st.session_state.config['pubmed_indexes'][index_choice]['embeddings_path']
-    pmids_path = st.session_state.config['pubmed_indexes'][index_choice]['pmids_path']
 
-    # TODO should this be cached?
-    screener = ScreenerBot.load_screener(
-        weights=default_weights,
-        embeddings_path=index_path,
-        pmids_positions=pmids_path,
-        device='cpu',
-    )
+    screener = load_screener(topic_uid)
     pmid_scores = screener.predict_for_topic(topic, pmids)
     print('scores sample', pmid_scores[:20])
     ranked_pmids, scores = zip(*pmid_scores)
 
     update_list = list(zip(scores, itertools.cycle([topic_uid]), ranked_pmids))
+    cur = get_db(False, pragma_cmd=PRAGMA_DEL)
     cur.executemany('''
         UPDATE search_screening_results SET robot_ranking=? WHERE topic_uid=? and pmid LIKE ?
     ''', update_list)
@@ -284,7 +321,7 @@ def run_robot_ranker(topic_uid):
 
 
 def get_topic_pubmed_results(topic_uid):
-    cur = get_db(True)
+    cur = get_db(True, pragma_cmd=PRAMGA_WAL)
     # TODO do these need to be escaped?
     res = cur.execute('''
         SELECT user_topics(topic_uid, pmid, human_decision, robot_ranking)
@@ -297,7 +334,7 @@ def get_topic_pubmed_results(topic_uid):
 
 
 def fetch_pmids_and_screening_results(topic_uid):
-    cur = get_db(True)
+    cur = get_db(True, pragma_cmd=PRAGMA_WAL)
     res = cur.execute('''
         SELECT pmid, human_decision, robot_ranking
         FROM search_screening_results
@@ -308,12 +345,16 @@ def fetch_pmids_and_screening_results(topic_uid):
     close_db(cur)
     return results
 
-def insert_unscreened_pmids(topic_uid, pmids):
-    cur = get_db(True)
-    cur.executemany('''
-        INSERT OR REPLACE INTO search_screening_results(topic_uid, pmid) VALUES(?, ?)
-    ''', [(topic_uid, str(pmid)) for pmid in pmids])
-    cur.commit()
+def insert_unscreened_pmids(topic_uid, pmids, ranks=None):
+    cur = get_db(True, pragma_cmd=PRAGMA_DEL)
+    if ranks is None:
+        ranks = itertools.cycle([None])
+    pmids = list(filter(lambda x: len(x) > 0 and x.isdigit(), map(str.strip, pmids)))
+    if len(pmids) > 0:
+        cur.executemany('''
+            INSERT OR REPLACE INTO search_screening_results(topic_uid, pmid, robot_ranking) VALUES(?, ?, ?)
+        ''', [(topic_uid, str(pmid), rank) for pmid, rank in zip(pmids, ranks)])
+        cur.commit()
     res = cur.execute('''
         SELECT pmid, human_decision, robot_ranking
         FROM search_screening_results
@@ -344,26 +385,27 @@ def get_persisted_pubmed_search_and_screening_results(topic_uid):
     return len(pmids), pmids, article_data_df, df
 
 def insert_topic_human_screening_pubmed_results(topic_uid, pmid_to_human_screening: dict, source='automatic'):
-    cur = get_db(False)
+    cur = get_db(False, pragma_cmd=PRAGMA_DEL)
     # TODO do these need to be escaped?
     decisions = Counter(pmid_to_human_screening.values())
     print(f'attempting to insert {len(pmid_to_human_screening)}; {decisions} screening decisions for topic {topic_uid}')
     cur.executemany('''
-        INSERT OR REPLACE INTO search_screening_results(topic_uid, pmid, human_decision, source)
+        INSERT INTO search_screening_results(topic_uid, pmid, human_decision, source)
         VALUES(:ti, :pm, :hs, :src)
+        ON CONFLICT(topic_uid, pmid)
+        DO UPDATE SET human_decision=:hs
     ''', [{'hs': human, 'ti': topic_uid, 'pm': pmid, 'src': source} for (pmid, human) in pmid_to_human_screening.items()])
     cur.commit()
     close_db(cur)
 
 def get_pubmed_article_data(pmids: list):
-    cur = get_db(True, db_path=st.session_state['pubmed_db_path'])
+    cur = get_db(True, db_path=st.session_state['pubmed_db_path'], pragma_cmd=PRAGMA_WAL)
     print(f'loading database {st.session_state["pubmed_db_path"]} to get records for {len(pmids)} pmids')
     query = f'''
         SELECT DISTINCT pmid,titles,abstracts
         FROM pubmed_data
         WHERE pmid IN ({','.join(map(str, pmids))})
     '''
-    #print(query)
     res = cur.execute(query)
     res = res.fetchall()
     close_db(cur)
@@ -371,7 +413,7 @@ def get_pubmed_article_data(pmids: list):
 
 def get_auto_evidence_map_from_topic_uid(topic_uid):
     # TODO should this be joined with screening?
-    cur = get_db(True)
+    cur = get_db(True, pragma_cmd=PRAGMA_WAL)
     query = '''
         SELECT pubmed_extractions_ico_re.pmid, pubmed_extractions_ico_re.intervention from pubmed_extractions_ico_re
         INNER JOIN search_screening_results ON pubmed_extractions_ico_re.pmid = search_screening_results.pmid
@@ -419,7 +461,7 @@ def get_auto_evidence_map_from_topic_uid(topic_uid):
     return pmids, selections
 
 def insert_numerical_extractions(extraction: List[Tuple]):
-    cur = get_db(True)
+    cur = get_db(True, pragma_cmd=PRAGMA_WAL)
     query = '''
         INSERT or REPLACE INTO pubmed_extractions_numerical(pmid, intervention, comparator, outcome, outcome_type, binary_result, continuous_result) VALUES(?,?,?,?,?,?,?)
         '''
@@ -427,7 +469,7 @@ def insert_numerical_extractions(extraction: List[Tuple]):
     cur.commit()
 
 def get_numerical_extractions_for_topic(topic_uid):
-    cur = get_db(True)
+    cur = get_db(True, pragma_cmd=PRAGMA_WAL)
     query = '''
         SELECT
             pubmed_extractions_ico_re.pmid,
@@ -452,8 +494,8 @@ def get_numerical_extractions_for_topic(topic_uid):
     return selections
 
 def get_extractions_for_pmids(pmids):
-    cur = get_db(True)
-    pmids = '(' + ','.join(pmids) + ')'
+    cur = get_db(True, pragma_cmd=PRAGMA_WAL)
+    pmids = '(' + ','.join(map(str, pmids)) + ')'
     query = f'''
         SELECT
         *
@@ -504,6 +546,42 @@ def get_extractions_for_pmids(pmids):
     extractions = pd.DataFrame.from_records(extractions)
     close_db(cur)
     return ico_re, extractions
+
+# TODO this should probably get moved into utils somehow?
+def finetune_ranker(topic_uid):
+    screener = load_screener(topic_uid, force_default=True)
+    topic_info = get_topic_info(topic_uid)
+    topic_text = topic_info['search_text']
+    screening_status = fetch_pmids_and_screening_results(topic_uid)
+    status_dict = {
+        'Include': set(),
+        'Exclude': set(),
+        'Unscreened': set()
+    }
+    for row in screening_status:
+        status_dict[row['human_decision']].add(row['pmid'])
+    counts = {x:len(y) for x,y in status_dict.items()}
+    negatives = status_dict['Exclude']
+    if len(negatives) < len(status_dict['Include']):
+        random.seed(12345)
+        # TODO include other negatives if needed!
+        # TODO should this sample from the whole DB?
+        negatives.update(random.sample(list(status_dict['Unscreened']), k=len(status_dict['Include']) - len(negatives)))
+
+    output_dir = _custom_screener_location(topic_uid)
+    if os.path.exists(output_dir):
+        os.rename(output_dir, output_dir + datetime.datetime.today().strftime('%Y_%m_%d_%H_%M_%S'))
+    os.makedirs(output_dir)
+    new_screener, losses = screener.finetune_for_annotations(
+            topic=topic_text,
+            positive_ids=list(status_dict['Include']),
+            negative_ids=list(negatives),
+            clone_model=True,
+    )
+    new_screener.save_pretrained(output_dir)
+    with open(os.path.join(output_dir, 'losses.json'), 'w') as of:
+        of.write(json.dumps(losses, indent=2))
+    return new_screener
 
 if not st.session_state.get('loaded_config', False):
     load_config()

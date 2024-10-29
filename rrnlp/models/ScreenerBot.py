@@ -18,6 +18,8 @@ from transformers import AutoModel, AutoTokenizer
 
 from rrnlp.models import get_device
 
+from info_nce import InfoNCE
+
 #weights_path = rrnlp.models.weights_path
 # TODO
 #weights = 'facebook/contriever'
@@ -77,11 +79,15 @@ class AnnoyRanker:
         # TODO note this uses dot, if we want a different measure (say, angular), we'll need to compute that manually since it seems Annoy doesn't expose that (note: verify this)
         embeds = [self.index.get_item_vector(position) for position in positions]
         embeds = np.array(embeds)
-        print(embeds.shape, vec.shape)
         distances = embeds @ vec
         distances = distances.squeeze()
-        print(embeds.shape, vec.shape, distances.shape)
         return pmids, distances
+
+    def get_pmid_embeds(self, pmids: List):
+        positions = [self.pmid_to_position[pmid] for pmid in pmids]
+        embeds = [self.index.get_item_vector(position) for position in positions]
+        embeds = np.array(embeds)
+        return embeds
 
     def find_nns_for_vec(self, vec: np.array, pmids: Optional[List]=None):
         raise NotImplementedError("Not presently using this capacity of a vector index")
@@ -133,6 +139,7 @@ class Screener:
             print(f'Computing distances took {embedding_end - embeddings_compute_end} seconds')
         else:
             assert False
+        # todo handle zero-length lists
         res = list(zip(res_pmids, distances))
         sorted(res, key=lambda x: x[1], reverse=True)
         return res
@@ -163,11 +170,10 @@ class Screener:
             topic: str,
             positive_ids: List,
             negative_ids: List,
-            epochs=5,
-            lr=1e-4,
-            finetune_only_last_layer=True,
+            epochs=10,
+            lr=5e-5,
+            finetune_only_last_layer=False,
             # for the loss function
-            temperature=0.05,
             clone_model=True,
         ):
         # I reluctantly use HF code here
@@ -176,6 +182,8 @@ class Screener:
             model = copy.deepcopy(self.model)
         else:
             model = self.model
+        model = self.model
+        model.train()
         if finetune_only_last_layer:
             for param in model.parameters():
                 param.requires_grad = False
@@ -183,10 +191,16 @@ class Screener:
             for param in model.encoder.layer[-1].parameters():
                 param.requires_grad = True
 
-        positive_embeddings = [self.embedding_index.xb.at(self.pmid_to_position[pmid]) for pmid in positive_ids]
-        negative_embeddings = [self.embedding_index.xb.at(self.pmid_to_position[pmid]) for pmid in negative_ids]
+        positive_ids_ = list(self.ranker.known_pmids() & set(positive_ids))
+        negative_ids_ = list(self.ranker.known_pmids() & set(negative_ids))
+        positive_embeddings = torch.tensor(self.ranker.get_pmid_embeds(positive_ids_), dtype=torch.float)
+        negative_embeddings = torch.tensor(self.ranker.get_pmid_embeds(negative_ids_), dtype=torch.float)
+        print(f'Given {len(positive_ids)} positive ids, know about {len(positive_ids_)}')
+        print(f'Given {len(negative_ids)} negative ids, know about {len(negative_ids_)}')
 
-        optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+        training_params = list(filter(lambda x: x.requires_grad, model.parameters()))
+        print(f'Training {len(training_params)} parameters')
+        optimizer = torch.optim.AdamW(training_params, lr=lr)
 
         # tokenize once to save the computer
         topic_inputs = self.tokenizer([topic], padding=True, truncation=True, return_tensors="pt").to(self.model.device)
@@ -199,34 +213,69 @@ class Screener:
         # warmup 1k steps
         # temperature 0.05 (with contrastive loss)
         # InfoNCE loss:
-        def loss_fn(topic_embedding, positive_doc_embeddings, negative_doc_embeddings, temperature):
-            def s(topic_embedding, doc):
-                return topic_embedding.dot(doc)
-            negative_loss_components = []
-            for negative_doc_embedding in negative_doc_embeddings:
-                negative_loss_components.append(F.exp(s(topic_embedding, negative_doc_embedding)/temperature))
-            negative_loss_component = torch.sum(negative_loss_components)
 
-            loss_components = []
+        def eval_ish(topic_embed):
+            all_docs = torch.cat([positive_embeddings, negative_embeddings], dim=0)
+            labels = torch.LongTensor([1 for _ in positive_embeddings] + [0 for _ in negative_embeddings])
+            all_evals = (topic_embed @ all_docs.t()).squeeze()
+            sort_idx = torch.argsort(all_evals, descending=True)
+            sort_labels = labels[sort_idx]
+            aps = []
+            mrr = None
+            dcgs_standard = []
+            idcgs = [] # idealized dcg
+            # the indexes for the dcgs begin at one
+            for i, label in enumerate(sort_labels):
+                ap = torch.sum(sort_labels[:i+1]) / (i + 1)
+                aps.append(ap)
+                if label == 1 and mrr is None:
+                    mrr = 1 / (i + 1)
+                dcgs_standard.append(label/torch.log2(torch.tensor(i + 1 + 1)))
+                idcgs.append((torch.pow(2, label) - 1) / torch.log2(torch.tensor(i + 1 + 1)))
 
-            for positive_doc_embedding in positive_doc_embeddings:
-                pos_value = s(topic_embedding, positive_doc_embedding)/temperature
-                loss_components.append(pos_value / (pos_value + negative_loss_component))
+            ap = np.mean(aps)
+            pat5 = sort_labels[:5].sum() / 5
+            pat1 = int(sort_labels[0] == 1)
+            idealized_dcg = np.mean(idcgs)
+            dcgs_standard = np.mean(dcgs_standard)
 
-            loss = -1 * torch.sum(loss_components)
-            return loss
+            return {
+                'ap': float(ap),
+                'mrr': float(mrr),
+                'precision at 1': float(pat1),
+                'precision at 5': float(pat5.item()),
+                'idcg': float(idealized_dcg),
+                'dcg': float(dcgs_standard.item()),
+            }
 
+        # TODO: pair this?
+        loss_fn = InfoNCE(negative_mode='unpaired')
         losses = []
-        for epoch in epochs:
+        metrics = [{} for _ in range(epochs+1)]
+        # TODO batches? this is _one_ instance
+        for epoch in range(epochs):
             optimizer.zero_grad()
-            topic_embeds = self.model(inputs, output_dict=True)
-            topic_embeds = Screener.mean_pooling(topic_embeds['return_attention_mask'], topic_embeds['return_attention_mask'])
+            topic_embeds = model(**topic_inputs, return_dict=True)
+            topic_embeds = topic_embeds['pooler_output']
             topic_embeds = F.normalize(topic_embeds, p=2, dim=1)
-            loss = loss_fn(topic_embeds, positive_embeddings, negative_embeddings, temperature)
+            res = eval_ish(topic_embeds.detach())
+            loss = loss_fn(topic_embeds.squeeze().repeat(positive_embeddings.size()[0], 1), positive_embeddings, negative_embeddings)
             loss.backward()
             optimizer.step()
-            losses.append(loss.detach().cpu())
+            metrics[epoch].update(res)
+            metrics[epoch+1]['loss'] = loss.item()
+            print(f'epoch {epoch-1}', res)
+            print(f'epoch {epoch} loss {loss.detach().cpu()}')
+            losses.append(loss.detach().cpu().item())
 
-        return model, losses
+        with torch.no_grad():
+            topic_embeds = model(**topic_inputs, return_dict=True)
+            topic_embeds = topic_embeds['pooler_output']
+            res = eval_ish(topic_embeds)
+            metrics[-1].update(res)
+            print(f'epoch {epochs}', res)
+
+        model.eval()
+        return model, metrics
 
 

@@ -161,11 +161,7 @@ class PubmedQueryGeneratorBot:
     def _clean_pmids(cls, pmids: Union[int, str, List[int], List[str]]):
         if isinstance(pmids, (str, int)):
             pmids = [str(pmids)]
-            if pmids[0].count(',') > 10000:
-                raise Exception('Entrez apis refuse to return more than 10k records, and refuse to allow starting retrieval after 10k')
         elif isinstance(pmids, list):
-            if len(pmids) > 10000:
-                raise Exception('Entrez apis refuse to return more than 10k records, and refuse to allow starting retrieval after 10k')
             pmids = list(map(str, pmids))
         else:
             assert False
@@ -223,7 +219,7 @@ class PubmedQueryGeneratorBot:
         if api_key is not None:
             Entrez.api_key = api_key
         if fetch_all_by_date:
-            pmids = _divide_and_conquer(query, datetime(1950, 1, 1), date.today())
+            pmids = _divide_and_conquer(query, datetime(1950, 1, 1), datetime.today())
             pmids = PubmedQueryGeneratorBot._clean_pmids(pmids)
             count = len(pmids)
         else:
