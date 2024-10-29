@@ -31,7 +31,7 @@ cochrane_filter = SearchBot.PubmedQueryGeneratorBot.rct_filter()
 
 # TODO don't use the copies when they can be avoided
 search_query = st.session_state.topic_information['search_query']
-st.markdown(f'Results for: {search_query}')
+st.markdown(f'Results for: {search_query}' + (f' AND <pre>{cochrane_filter}</pre>' if st.session_state.topic_information.get('used_cochrane_filter', 0) == 1 else ''))
 st.write('No more search results can be added via pubmed searches. Add any others manually:')
 with st.form('Insert bulk screening results'):
     st.markdown('Insert a list of pmids to Include. Use spaces or commas to separate them')
@@ -65,7 +65,7 @@ with st.form('Insert bulk screening results'):
 # TODO add a guardrail so this can't be finetuned too soon
 # TODO how to handle already screened results?
 if finetune_ranker := st.button('Finetune AutoRanker'):
-    with st.spinner('Finetuning the auto ranker and reranking'):
+    with st.spinner('Finetuning the auto ranker and reranking (time for another coffee)'):
         database_utils.finetune_ranker(st.session_state.topic_information['topic_uid'])
 if st.button('Run AutoRanker (~1 minute / 5k)?') or finetune_ranker:
     database_utils.run_robot_ranker(st.session_state.topic_information['topic_uid'])
@@ -99,8 +99,14 @@ df = df[keep_columns]
 edit_columns = ['human_decision']
 frozen_columns = set(keep_columns) - set(edit_columns)
 
+unscreened_only = st.checkbox('Show Unscreened Only')
+if unscreened_only:
+    display_df = df[df['human_decision'] == 'Unscreened']
+else:
+    display_df = df
+
 screening_results = st.data_editor(
-    df,
+    display_df,
     column_config={
         'pmid': st.column_config.TextColumn(
             'PMID',
