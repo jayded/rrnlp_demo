@@ -550,22 +550,23 @@ def get_extractions_for_pmids(pmids):
 # TODO this should probably get moved into utils somehow?
 def finetune_ranker(topic_uid):
     screener = load_screener(topic_uid, force_default=True)
-    topic_text = get_topic_info(topic_uid)
+    topic_info = get_topic_info(topic_uid)
+    topic_text = topic_info['search_text']
     screening_status = fetch_pmids_and_screening_results(topic_uid)
     status_dict = {
         'Include': set(),
         'Exclude': set(),
         'Unscreened': set()
     }
-    print(f'Status dict: {status_dict}')
-    print(f'Screening status: {screening_status}')
     for row in screening_status:
         status_dict[row['human_decision']].add(row['pmid'])
+    counts = {x:len(y) for x,y in status_dict.items()}
     negatives = status_dict['Exclude']
     if len(negatives) < len(status_dict['Include']):
         random.seed(12345)
         # TODO include other negatives if needed!
-        negatives.add(random.sample(status_dict['Unscreened'], k=len(status_dict['Include']) - len(negatives)))
+        # TODO should this sample from the whole DB?
+        negatives.update(random.sample(list(status_dict['Unscreened']), k=len(status_dict['Include']) - len(negatives)))
 
     output_dir = _custom_screener_location(topic_uid)
     if os.path.exists(output_dir):
