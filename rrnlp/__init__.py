@@ -92,8 +92,7 @@ class TrialReader:
         """
 
         if task_list is None:
-            task_list = ["rct_bot", "pico_span_bot", "punchline_bot",
-                   "bias_ab_bot", "sample_size_bot"]
+            task_list = list(self.models.keys())
         # do not modify the source list which may get re-used many times.
         task_list = list(task_list)
 
