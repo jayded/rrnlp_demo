@@ -99,11 +99,18 @@ df = df[keep_columns]
 edit_columns = ['human_decision']
 frozen_columns = set(keep_columns) - set(edit_columns)
 
-unscreened_only = st.checkbox('Show Unscreened Only')
-if unscreened_only:
-    display_df = df[df['human_decision'] == 'Unscreened']
-else:
-    display_df = df
+screening_choice = st.radio('Show:', options=['All', 'Unscreened', 'Included', 'Excluded', 'Any processed'])
+match screening_choice:
+    case 'Unscreened':
+        display_df = df[df['human_decision'] == 'Unscreened']
+    case 'Included':
+        display_df = df[df['human_decision'] == 'Include']
+    case 'Excluded':
+        display_df = df[df['human_decision'] == 'Exclude']
+    case 'Any processed':
+        display_df = df[df['human_decision'] != 'Unscreened']
+    case 'All' | _:
+        display_df = df
 
 screening_results = st.data_editor(
     display_df,
