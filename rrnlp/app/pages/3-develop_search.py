@@ -2,10 +2,11 @@ import time
 import streamlit as st
 st.set_page_config(page_title='Search Development', layout='wide')
 
-from rrnlp.app.utils import get_searcher
 import rrnlp.app.database_utils as database_utils
 #from database_utils import get_next_topic_uid
 import rrnlp.models.SearchBot as SearchBot
+
+from rrnlp.app.celery_app import generate_search as celery_generate_search
 
 # manage what page we're on
 if 'uid' not in st.session_state:
@@ -25,21 +26,12 @@ if not st.session_state.get('loaded_config', False):
 
 # speed up loading, so this only happens once.
 # for development
-get_searcher_start = time.time()
-searcher = get_searcher()
-get_searcher_end = time.time()
-print(f'getting the searcher took {get_searcher_end - get_searcher_start} seconds')
 
 @st.cache_data
 def generate_search(search_text):
-    print('getting searcher')
-    get_searcher_start = time.time()
-    searcher = get_searcher()
-    get_searcher_end = time.time()
-    print(f'getting the searcher took {get_searcher_end - get_searcher_start} seconds')
-    print(f'generating search for prompt {search_text}')
     generate_start = time.time()
-    query = searcher.generate_review_topic(search_text)
+    print('generating search', search_text)
+    query = celery_generate_search(search_text)
     generate_end = time.time()
     print(f'generating the query took {generate_end - generate_start} seconds')
     st.session_state.running_generate_search = False
