@@ -89,7 +89,7 @@ with st.form("search_form"):
 
 
 if len(st.session_state.topic_information.get('search_text', '')) > 0 and len(str(query)) > 0:
-    cochrane_filter = SearchBot.PubmedQueryGeneratorBot.rct_filter()
+    cochrane_filter = '<pre>' + SearchBot.PubmedQueryGeneratorBot.rct_filter() + '</pre>'
     with st.form("search"):
         query = st.text_area('Search query', value=st.session_state.topic_information['search_query'])
         if st.checkbox(f'Add Cochrane RCT filter? {cochrane_filter}', value=st.session_state.topic_information.get('used_cochrane_filter', 0) == 1):
@@ -133,9 +133,10 @@ if len(st.session_state.topic_information.get('search_text', '')) > 0 and len(st
                 st.session_state.topic_information['execute_search'] = False
 
 if st.session_state.topic_information.get('df', None) is not None:
+    st.markdown(f'Retrieved {len(st.session_state.topic_information["df"])} articles')
     if 'index' in st.session_state.topic_information['df'].columns:
         del st.session_state.topic_information['df']['index']
-    if st.button('Finalize'):
+    if st.button('Finalize search and begin screening?'):
         st.session_state.topic_information['final'] = 1
         finalize = 1
         database_utils.insert_unscreened_pmids(
@@ -157,6 +158,7 @@ if st.session_state.topic_information.get('df', None) is not None:
         st.switch_page('pages/4-search_results_and_screening.py')
     else:
         finalize = 0
+    # TODO add button to rerun the ranker here?
     st.dataframe(
         st.session_state.topic_information['df'],
         hide_index=True,
