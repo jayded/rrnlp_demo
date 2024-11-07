@@ -1,30 +1,30 @@
 import copy
 import json
 import os
-import sys 
+import sys
 from typing import List, Optional, Tuple, Type
 
 import faiss
-import numpy as np 
+import numpy as np
 
 #from pymilvus import MilvusClient
-import torch 
+import torch
 import torch.nn.functional as F
 
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
 from rrnlp.models import get_device
 
 #weights_path = rrnlp.models.weights_path
 # TODO
-weights = ''
+weights = '/data/ei_demo/flan_t5_large_adamw_hf_steps10000_lr1e-4'
 
 def load_mds_summary_bot(
         weights: str=weights, #hf model string or path
         device='auto',
     ):
     device = get_device(device)
-    model = AutoModelForCausalLM.from_pretrained(weights).to(device)
+    model = AutoModelForSeq2SeqLM.from_pretrained(weights).to(device)
     tokenizer = AutoTokenizer.from_pretrained(weights)
     return MDSSummaryBot(model, tokenizer)
 
@@ -32,17 +32,54 @@ def load_mds_summary_bot(
 class MDSSummaryBot:
     def __init__(
         self,
-        model: AutoModelForCausalLM,
+        model: AutoModelForSeq2SeqLM,
         tokenizer: AutoTokenizer,
     ):
         self.model = model
         self.tokenizer = tokenizer
 
     def predict_for_topic(self, topic: str, pmids: List):
-        pass
+        raise not NotImplemented()
+
+    def predict_for_docs(self, topic: str, docs: List[str]):
+        input_ids, attention_mask = self._prep(topic, docs)
+        outputs = self.model.generate(input_ids=input_ids, attention_mask=attention_mask, num_beams=5, max_length=512)
+        print(outputs)
+        outputs = [self.tokenizer.decode(pred.cpu(), skip_special_tokens=True) for pred in outputs]
+        print(outputs)
+        assert len(outputs) == 1, outputs
+        outputs = outputs[0]
+        return outputs
+
+
+    def _prep(self, topic: str, docs: List[str]):
+        docs = list(map(lambda p: p.replace('  ', ' ').strip(), docs))
+        docs = list(filter(bool, docs))
+        # use the </s> token
+        # TODO ... this needs better parameterization
+        # 16k is not a good length choice
+        tokenized_parts = [self.tokenizer(doc, add_special_tokens=True, truncation=True, max_length=16000 // len(docs)) for doc in docs]
+        input_ids = []
+        attention_mask = []
+        global_attention_mask = []
+        for tokenized_part in tokenized_parts:
+            input_ids.extend(tokenized_part['input_ids'])
+            #input_ids.append(docsep_id)
+            attention_mask.extend(tokenized_part['attention_mask'])
+            #attention_mask.append(1)
+            global_attention_mask.extend([0] * (len(tokenized_part['input_ids'])))
+            global_attention_mask[-1] = 1
+            #global_attention_mask.append(1)
+
+        #global_attention_mask[-1] = 0
+        input_ids = input_ids[:16000 - 1]
+        attention_mask = attention_mask[:16000 - 1]
+        global_attention_mask = global_attention_mask[:16000 - 1]
+
+        return torch.LongTensor([input_ids], device=self.model.device), torch.LongTensor([attention_mask], device=self.model.device)
 
     def supports_gpu(self) -> bool:
         return True
 
     def to(self, device: str):
-        self.model.to(device)
+        return self.model.to(device)
