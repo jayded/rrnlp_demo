@@ -13,7 +13,7 @@ if 'topic_information' not in st.session_state or 'topic_uid' not in st.session_
     st.switch_page('pages/2-existing_projects.py')
 
 if st.session_state.topic_information['final'] != 1:
-    st.switch_page('pages/4-search_results_and_screening.py')
+    st.switch_page('pages/3-develop_search.py')
 
 if 'current_screening' not in st.session_state.topic_information:
     st.session_state.topic_information['current_screening'] = {}
@@ -96,11 +96,7 @@ with column1:
             st.session_state.topic_information['current_screening']['current_pmid'] = st.session_state.topic_information['current_screening']['pmids'].pop()
         else:
             st.markdown('No more pmids to screen!')
-            if st.button("Return to bulk screening", use_container_width=True):
-                st.switch_page('pages/4-search_results_and_screening.py', use_container_width=True)
 
-            if st.button("View Evidence Map", use_container_width=True):
-                st.switch_page('pages/6-evidence_map.py')
             st.stop()
 
     this_article = article_data_df[article_data_df['pmid'] == st.session_state.topic_information['current_screening']['current_pmid']]
