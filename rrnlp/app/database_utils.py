@@ -31,9 +31,11 @@ def load_config():
     with open(config_file, 'r', encoding='utf-8') as file:
         config = yaml.load(file, Loader=SafeLoader)
     st.session_state.config = config
-    st.session_state['db_path'] = config['db_path']
+    st.session_state['source_db_path'] = config['source_db_path']
+    st.session_state['user_data_db_path'] = config['user_data_db_path']
     # TODO merge with the above db?
-    st.session_state['pubmed_db_path'] = config['pubmed_db_path']
+    st.session_state['pubmed_data_db_path'] = config['pubmed_data_db_path']
+    st.session_state['openai_api_key'] = config['openai_api_key']
     # TODO verify with each of these that the user can write to this topic...
     st.session_state['loaded_config'] = True
 
@@ -72,19 +74,26 @@ def load_screener(topic_uid, force_default=True):
         )
         return screener
 
-def get_db(fancy_row_factory=True, db_path=None, pragma_cmd=None):
+def get_db(fancy_row_factory=True, source_db_path=None, user_data_db=None, pubmed_data_db=None, pragma_cmd=None):
 
     def namedtuple_factory(cursor, row):
         return dict(zip([x[0] for x in cursor.description], row))
 
-    if db_path is None:
-        db_path = st.session_state.db_path
+    if source_db_path is None:
+        source_db_path = st.session_state.source_db_path
+    if user_data_db is None:
+        user_data_db = st.session_state.user_data_db_path
+    if pubmed_data_db is None:
+        pubmed_data_db = st.session_state.pubmed_data_db_path
+    print(f'connecting to {source_db_path}, {user_data_db}, {pubmed_data_db}')
 
     cur = sqlite3.connect(
-        f'file:{db_path}?mode=rw',
+        f'file:{source_db_path}?mode=rw',
         uri=True,
         detect_types=sqlite3.PARSE_DECLTYPES
     )
+    cur.execute(f'ATTACH "{user_data_db}" as user_db')
+    cur.execute(f'ATTACH "{pubmed_data_db}" as pubmed_db')
     if fancy_row_factory:
         cur.row_factory = namedtuple_factory
     if pragma_cmd is not None:
@@ -98,7 +107,7 @@ def close_db(db, e=None):
 
 def current_topics(uid):
     cur = get_db(True, pragma_cmd=PRAGMA_DEL)
-    res = cur.execute('''select topic_uid, topic_name, search_text, search_query, generated_query, final from user_topics where uid=?''', (uid,))
+    res = cur.execute('''select topic_uid, topic_name, search_text, search_query, generated_query, final from user_db.user_topics where uid=?''', (uid,))
     all_topics = res.fetchall()
     close_db(cur)
     return all_topics
@@ -122,7 +131,7 @@ def get_next_topic_uid(
     search_text = search_text.replace('"', "''")
     query = search_query.replace('"', "''")
     cur = get_db(False, pragma_cmd=PRAGMA_DEL)
-    res = cur.execute('''select MAX(topic_uid) from user_topics;''')
+    res = cur.execute('''select MAX(topic_uid) from user_db.user_topics;''')
     res = res.fetchone()[0]
     if res is None:
         next_topic = 0
@@ -133,7 +142,7 @@ def get_next_topic_uid(
     if uid:
         cur.execute('''
                 INSERT INTO
-                user_topics(topic_uid, uid, topic_name, search_text, search_query, generated_query, used_cochrane_filter, used_robot_reviewer_rct_filter, final)
+                user_db.user_topics(topic_uid, uid, topic_name, search_text, search_query, generated_query, used_cochrane_filter, used_robot_reviewer_rct_filter, final)
                 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?);
             ''', (next_topic, uid, topic_name, search_text, search_query, generated_query, used_cochrane_filter, used_robot_reviewer_rct_filter, final)
         )
@@ -172,7 +181,7 @@ def write_topic_info(
     # TODO do these need to be escaped?
     cur.execute('''
         INSERT OR REPLACE INTO
-        user_topics(topic_uid, uid, topic_name, search_text, search_query, generated_query, used_cochrane_filter, used_robot_reviewer_rct_filter, final)
+        user_db.user_topics(topic_uid, uid, topic_name, search_text, search_query, generated_query, used_cochrane_filter, used_robot_reviewer_rct_filter, final)
         VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?);
         ''', (topic_uid, uid, topic_name, search_text, search_query, generated_query, used_cochrane_filter, used_robot_reviewer_rct_filter, final)
     )
@@ -184,7 +193,7 @@ def write_topic_info(
 def get_topic_info(topic_uid):
     cur = get_db(True, pragma_cmd=PRAGMA_WAL)
     res = cur.execute('''
-        select topic_uid, uid, topic_name, search_text, search_query, generated_query, used_cochrane_filter, used_robot_reviewer_rct_filter, final from user_topics
+        select topic_uid, uid, topic_name, search_text, search_query, generated_query, used_cochrane_filter, used_robot_reviewer_rct_filter, final from user_db.user_topics
         where topic_uid=?
     ''',(topic_uid,))
     results = res.fetchall()
@@ -280,7 +289,9 @@ def perform_pubmed_search(pubmed_query, topic_uid, persist, run_ranker=False, fe
             update_list = list(zip(df['robot_ranking'], itertools.cycle([topic_uid]), df['pmid']))
             cur = get_db(pragma_cmd=PRAGMA_WAL)
             cur.executemany('''
-                UPDATE search_screening_results SET robot_ranking=? WHERE topic_uid=? and pmid LIKE ?
+                UPDATE user_db.search_screening_results
+                SET robot_ranking=?
+                WHERE topic_uid=? AND pmid LIKE ?
             ''', update_list)
             cur.commit()
 
@@ -293,13 +304,13 @@ def run_robot_ranker(topic_uid):
     # TODO active learning storage?
     start_time = time.time()
     cur = get_db(False, pragma_cmd=PRAGMA_WAL)
-    res = cur.execute('''select search_text from user_topics where topic_uid=?''', (topic_uid,))
+    res = cur.execute('''select search_text from user_topics where user_db.topic_uid=?''', (topic_uid,))
     topic = res.fetchone()[0]
 
     res = cur.execute('''
-        SELECT pmid FROM search_screening_results
-        WHERE search_screening_results.topic_uid LIKE ?
-        ORDER BY search_screening_results.robot_ranking DESC
+        SELECT pmid FROM user_db.search_screening_results
+        WHERE user_db.search_screening_results.topic_uid LIKE ?
+        ORDER BY user_db.search_screening_results.robot_ranking DESC
     ''', (topic_uid,))
     pmids = res.fetchall()
     pmids = [x[0] for x in pmids]
@@ -312,7 +323,7 @@ def run_robot_ranker(topic_uid):
     update_list = list(zip(scores, itertools.cycle([topic_uid]), ranked_pmids))
     cur = get_db(False, pragma_cmd=PRAGMA_DEL)
     cur.executemany('''
-        UPDATE search_screening_results SET robot_ranking=? WHERE topic_uid=? and pmid LIKE ?
+        UPDATE user_db.search_screening_results SET robot_ranking=? WHERE topic_uid=? and pmid LIKE ?
     ''', update_list)
     cur.commit()
     print(update_list[:10])
@@ -324,7 +335,7 @@ def get_topic_pubmed_results(topic_uid):
     cur = get_db(True, pragma_cmd=PRAMGA_WAL)
     # TODO do these need to be escaped?
     res = cur.execute('''
-        SELECT user_topics(topic_uid, pmid, human_decision, robot_ranking)
+        SELECT user_db.user_topics(topic_uid, pmid, human_decision, robot_ranking)
         WHERE topic_uid LIKE (?,)
         ORDER BY robot_ranking DESC
     ''', (topic_uid,))
@@ -337,7 +348,7 @@ def fetch_pmids_and_screening_results(topic_uid):
     cur = get_db(True, pragma_cmd=PRAGMA_WAL)
     res = cur.execute('''
         SELECT pmid, human_decision, robot_ranking
-        FROM search_screening_results
+        FROM user_db.search_screening_results
         WHERE topic_uid = ?
         ORDER BY robot_ranking DESC
     ''', (topic_uid,))
@@ -352,12 +363,12 @@ def insert_unscreened_pmids(topic_uid, pmids, ranks=None):
     pmids = list(filter(lambda x: len(x) > 0 and x.isdigit(), map(str.strip, pmids)))
     if len(pmids) > 0:
         cur.executemany('''
-            INSERT OR REPLACE INTO search_screening_results(topic_uid, pmid, robot_ranking) VALUES(?, ?, ?)
+            INSERT OR REPLACE INTO user_db.search_screening_results(topic_uid, pmid, robot_ranking) VALUES(?, ?, ?)
         ''', [(topic_uid, str(pmid), rank) for pmid, rank in zip(pmids, ranks)])
         cur.commit()
     res = cur.execute('''
         SELECT pmid, human_decision, robot_ranking
-        FROM search_screening_results
+        FROM user_db.search_screening_results
         WHERE topic_uid = ?
         ORDER BY robot_ranking DESC
     ''', (topic_uid,))
@@ -390,7 +401,7 @@ def insert_topic_human_screening_pubmed_results(topic_uid, pmid_to_human_screeni
     decisions = Counter(pmid_to_human_screening.values())
     print(f'attempting to insert {len(pmid_to_human_screening)}; {decisions} screening decisions for topic {topic_uid}')
     cur.executemany('''
-        INSERT INTO search_screening_results(topic_uid, pmid, human_decision, source)
+        INSERT INTO user_db.search_screening_results(topic_uid, pmid, human_decision, source)
         VALUES(:ti, :pm, :hs, :src)
         ON CONFLICT(topic_uid, pmid)
         DO UPDATE SET human_decision=:hs
@@ -399,11 +410,11 @@ def insert_topic_human_screening_pubmed_results(topic_uid, pmid_to_human_screeni
     close_db(cur)
 
 def get_pubmed_article_data(pmids: list):
-    cur = get_db(True, db_path=st.session_state['pubmed_db_path'], pragma_cmd=PRAGMA_WAL)
-    print(f'loading database {st.session_state["pubmed_db_path"]} to get records for {len(pmids)} pmids')
+    cur = get_db(True, pragma_cmd=PRAGMA_WAL)
+    print(f'fetching records for {len(pmids)} pmids')
     query = f'''
-        SELECT DISTINCT pmid,titles,abstracts
-        FROM pubmed_data
+        SELECT DISTINCT pmid,title,abstract
+        FROM pubmed_db.article_data
         WHERE pmid IN ({','.join(map(str, pmids))})
     '''
     res = cur.execute(query)
@@ -411,87 +422,93 @@ def get_pubmed_article_data(pmids: list):
     close_db(cur)
     return res
 
-def get_auto_evidence_map_from_topic_uid(topic_uid):
-    # TODO should this be joined with screening?
+def get_auto_evidence_map_from_topic_uid(topic_uid, included_documents_only):
     cur = get_db(True, pragma_cmd=PRAGMA_WAL)
-    query = '''
-        SELECT pubmed_extractions_ico_re.pmid, pubmed_extractions_ico_re.intervention from pubmed_extractions_ico_re
-        INNER JOIN search_screening_results ON pubmed_extractions_ico_re.pmid = search_screening_results.pmid
-        WHERE topic_uid = :topic_uid
-    '''
-        #AND search_screening_results.human_decision = "Include"
-    print(query, topic_uid)
-    pmids = cur.execute(query, {'topic_uid': topic_uid})
-    pmids = pmids.fetchall()
-    print(f'found {len(pmids)} pmids')
-            # TODO add this to the database
-            #pubmed_extractions_ico_re.label,
-            #pubmed_extractions_ico_re.population,
-            #pubmed_extractions_ico_re.sample_size,
-            #pubmed_extractions.prob_low_rob,
-            #pubmed_extractions.low_rsg_bias,
-            #pubmed_extractions.low_ac_bias,
-            #pubmed_extractions.low_bpp_bias
-            #pubmed_extractions.title AS title,
-            #pubmed_extractions.abstract as abstract,
-    query = '''
-        SELECT
-            pubmed_extractions_ico_re.pmid,
-            pubmed_data.titles AS title,
-            pubmed_data.abstracts as abstract,
-            pubmed_extractions_ico_re.intervention,
-            pubmed_extractions_ico_re.comparator,
-            pubmed_extractions_ico_re.outcome,
-            pubmed_extractions_ico_re.evidence,
-            pubmed_extractions.p,
-            pubmed_extractions.num_randomized,
-            pubmed_extractions.prob_lob_rob
-        FROM pubmed_extractions_ico_re
-        INNER JOIN search_screening_results ON pubmed_extractions_ico_re.pmid = search_screening_results.pmid
-        INNER JOIN pubmed_extractions ON pubmed_extractions.pmid = search_screening_results.pmid
-        LEFT JOIN pubmed_data on pubmed_data.pmid = search_screening_results.pmid
-        WHERE search_screening_results.topic_uid = :topic_uid
-        AND search_screening_results.human_decision = "Include"
-        ORDER BY search_screening_results.robot_ranking DESC
-    '''
-    print(query)
-    res = cur.execute(query, {'topic_uid': topic_uid})
-    selections = res.fetchall()
-    close_db(cur)
-    return pmids, selections
 
-def insert_numerical_extractions(extraction: List[Tuple]):
-    cur = get_db(True, pragma_cmd=PRAGMA_WAL)
-    query = '''
-        INSERT or REPLACE INTO pubmed_extractions_numerical(pmid, intervention, comparator, outcome, outcome_type, binary_result, continuous_result) VALUES(?,?,?,?,?,?,?)
-        '''
-    cur.executemany(query, extractions)
-    cur.commit()
-
-def get_numerical_extractions_for_topic(topic_uid):
-    cur = get_db(True, pragma_cmd=PRAGMA_WAL)
-    query = '''
-        SELECT
-            pubmed_extractions_ico_re.pmid,
-            pubmed_extractions.title AS title,
-            pubmed_extractions.abstract as abstract,
-            pubmed_extractions_numerical.intervention,
-            pubmed_extractions_numerical.comparator,
-            pubmed_extractions_numerical.outcome,
-            pubmed_extractions_numerical.outcome_type,
-            pubmed_extractions_numerical.binary_result,
-            pubmed_extractions_numerical.continuous_result
-        FROM pubmed_extractions_numerical
-        INNER JOIN search_screening_results ON pubmed_extractions_numerical.pmid = search_screening_results.pmid
-        INNER JOIN pubmed_extractions ON pubmed_extractions.pmid = search_screening_results.pmid
-        WHERE search_screening_results.topic_uid = :topic_uid
-        AND search_screening_results.human_decision = "Include"
-        ORDER BY search_screening_results.robot_ranking DESC
+    query = f'''
+        SELECT pmid
+        FROM user_db.search_screening_results screening
+        WHERE screening.topic_uid = {topic_uid}
+        AND screening.human_decision = 'Include'
     '''
-    res = cur.execute(query, {'topic_uid': topic_uid})
-    selections = res.fetchall()
+    included_pmids = set([x['pmid'] for x in cur.execute(query).fetchall()])
+    if included_documents_only:
+        clause = 'WHERE screening.human_decision = "Include"'
+    else:
+        clause = ''
+    query = f'''
+        SELECT
+          article_data.pmid,
+          screening.human_decision,
+          screening.robot_ranking,
+          article_data.title,
+          article_data.abstract,
+          article_data.journal,
+          article_data.pubdate,
+          article_data.publication_types,
+          article_data.keywords,
+          article_data.is_rct,
+          article_data.prob_rct,
+          study_bot.study_design,
+          study_bot.is_rct,
+          study_bot.prob_rct,
+          study_bot.prob_low_rob,
+          study_bot.num_randomized,
+          study_design,
+          study_bot.prob_sr,
+          study_bot.is_sr,
+          study_bot.prob_cohort,
+          study_bot.is_cohort,
+          study_bot.prob_consensus,
+          study_bot.is_consensus,
+          study_bot.prob_ct,
+          study_bot.is_ct,
+          study_bot.prob_ct_protocol,
+          study_bot.is_ct_protocol,
+          study_bot.prob_guideline,
+          study_bot.is_guideline,
+          study_bot.prob_qual,
+          study_bot.is_qual,
+          study_bot.is_rct,
+          study_bot.rct_bot_is_rct,
+          study_bot.rct_bot_is_rct_sensitive,
+          study_bot.rct_bot_is_rct_balanced,
+          study_bot.rct_bot_is_rct_precise
+        FROM
+            user_db.search_screening_results screening
+        INNER JOIN
+            pubmed_db.article_data article_data
+        ON
+            screening.pmid = article_data.pmid
+        LEFT JOIN
+            pubmed_db.study_design_bot study_bot
+        ON
+            article_data.pmid = study_bot.pmid
+        {clause}
+    '''
+    res = cur.execute(query)
+    extractions = res.fetchall()
+    extractions = pd.DataFrame.from_records(extractions)
+    pmids = '(' + ','.join(set(map(str, extractions['pmid']))) + ')'
+    query = f'''
+        SELECT
+        *
+        FROM pubmed_db.ico_ev_bot ico_re
+        WHERE pmid in {pmids}
+    '''
+    res = cur.execute(query)
+    ico_re = res.fetchall()
+    ico_re = pd.DataFrame.from_records(ico_re)
+    query = f'''
+    SELECT *
+    FROM pubmed_db.pico_bot pico_bot
+    WHERE pico_bot.pmid in {pmids}
+    '''
+    res = cur.execute(query)
+    picos = res.fetchall()
+    picos = pd.DataFrame.from_records(picos)
     close_db(cur)
-    return selections
+    return included_pmids, ico_re, picos, extractions
 
 def get_extractions_for_pmids(pmids):
     cur = get_db(True, pragma_cmd=PRAGMA_WAL)
@@ -499,7 +516,7 @@ def get_extractions_for_pmids(pmids):
     query = f'''
         SELECT
         *
-        from pubmed_extractions_ico_re
+        FROM pubmed_db.ico_ev_bot ico_re
         WHERE pmid in {pmids}
     '''
     res = cur.execute(query)
@@ -508,44 +525,59 @@ def get_extractions_for_pmids(pmids):
 
     query = f'''
         SELECT
-          mesh_terms,
-          keywords,
-          is_rct,
-          prob_rct,
-          is_rct_sensitive,
-          is_rct_balanced,
-          is_rct_precise,
-          prob_lob_rob,
-          num_randomized,
+          article_data.pmid,
+          article_data.journal,
+          article_data.pubdate,
+          article_data.publication_types,
+          article_data.keywords,
+          article_data.is_rct,
+          article_data.prob_rct,
+          study_bot.study_design,
+          study_bot.is_rct,
+          study_bot.prob_rct,
+          study_bot.prob_low_rob,
+          study_bot.num_randomized,
           study_design,
-          prob_sr,
-          is_sr,
-          prob_cohort,
-          is_cohort,
-          prob_consensus,
-          is_consensus,
-          prob_ct,
-          is_ct,
-          prob_ct_protocol,
-          is_ct_protocol,
-          prob_guideline,
-          is_guideline,
-          prob_qual,
-          is_qual,
-          p,
-          p_mesh,
-          i,
-          i_mesh,
-          o,
-          o_mesh
-        from pubmed_extractions
-        WHERE pmid in {pmids}
+          study_bot.prob_sr,
+          study_bot.is_sr,
+          study_bot.prob_cohort,
+          study_bot.is_cohort,
+          study_bot.prob_consensus,
+          study_bot.is_consensus,
+          study_bot.prob_ct,
+          study_bot.is_ct,
+          study_bot.prob_ct_protocol,
+          study_bot.is_ct_protocol,
+          study_bot.prob_guideline,
+          study_bot.is_guideline,
+          study_bot.prob_qual,
+          study_bot.is_qual,
+          study_bot.is_rct,
+          study_bot.rct_bot_is_rct,
+          study_bot.rct_bot_is_rct_sensitive,
+          study_bot.rct_bot_is_rct_balanced,
+          study_bot.rct_bot_is_rct_precise
+        FROM 
+            pubmed_db.article_data article_data
+        LEFT JOIN
+            pubmed_db.study_design_bot study_bot
+        ON
+            article_data.pmid = study_bot.pmid
+        WHERE article_data.pmid in {pmids}
     '''
     res = cur.execute(query)
     extractions = res.fetchall()
     extractions = pd.DataFrame.from_records(extractions)
+    query = f'''
+    SELECT *
+    FROM pubmed_db.pico_bot pico_bot
+    WHERE pico_bot.pmid in {pmids}
+    '''
+    res = cur.execute(query)
+    picos = res.fetchall()
+    picos = pd.DataFrame.from_records(picos)
     close_db(cur)
-    return ico_re, extractions
+    return ico_re, picos, extractions
 
 # TODO this should probably get moved into utils somehow?
 def finetune_ranker(topic_uid):

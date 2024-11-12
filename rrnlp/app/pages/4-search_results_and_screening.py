@@ -135,12 +135,12 @@ screening_results = st.data_editor(
             help='AutoRanker Results',
             width='small',
         ),
-        'titles': st.column_config.TextColumn(
+        'title': st.column_config.TextColumn(
             'Title',
             help='pubmed article title',
             width='large',
         ),
-        'abstracts': st.column_config.TextColumn(
+        'abstract': st.column_config.TextColumn(
             'Abstract',
             help='pubmed article abstract',
             width='large',
