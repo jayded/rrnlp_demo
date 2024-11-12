@@ -1,5 +1,9 @@
 import time
+
 import streamlit as st
+
+from markupsafe import escape
+
 st.set_page_config(page_title='Search Development', layout='wide')
 
 import rrnlp.app.database_utils as database_utils
@@ -46,7 +50,7 @@ with st.form("search_form"):
 
     # generate a search / fill in the default form value with the old / existing one
     old_search_text = st.session_state.topic_information.get('search_text', '').strip()
-    new_search_text = st.text_area('Enter a description, e.g. a review title, for the topic you\'re interested in:', value=old_search_text).strip()
+    new_search_text = st.text_area(f'Enter a description, e.g. a review title, for "{st.session_state.topic_information["topic_name"]}":', value=old_search_text).strip()
     generate_submitted = st.form_submit_button(
         "Generate Search",
         disabled=st.session_state.get('running_generate_search', False),
@@ -55,7 +59,7 @@ with st.form("search_form"):
         st.stop()
     # resurrect the old query or generate a new one
     if generate_submitted and len(new_search_text) > 0:
-        if old_search_text == new_search_text:
+        if old_search_text == new_search_text and len(st.session_state.topic_information.get('generated_query', '')) > 0:
             query = st.session_state.topic_information['search_query']
         else:
             with st.spinner('Generating search'):
@@ -81,10 +85,10 @@ with st.form("search_form"):
 
 
 if len(st.session_state.topic_information.get('search_text', '')) > 0 and len(str(query)) > 0:
-    cochrane_filter = '<pre>' + SearchBot.PubmedQueryGeneratorBot.rct_filter() + '</pre>'
+    cochrane_filter = SearchBot.PubmedQueryGeneratorBot.rct_filter()
     with st.form("search"):
         query = st.text_area('Search query', value=st.session_state.topic_information['search_query'])
-        if st.checkbox(f'Add Cochrane RCT filter? {cochrane_filter}', value=st.session_state.topic_information.get('used_cochrane_filter', 0) == 1):
+        if st.checkbox(f'Add Cochrane RCT filter? {escape(cochrane_filter)}', value=st.session_state.topic_information.get('used_cochrane_filter', 0) == 1):
             st.session_state.topic_information['used_cochrane_filter'] = 1
             added_filter = ' AND ' + cochrane_filter
             use_rct_filter = True
@@ -114,7 +118,7 @@ if len(st.session_state.topic_information.get('search_text', '')) > 0 and len(st
                     st.session_state.topic_information['topic_uid'],
                     persist=False,
                     run_ranker=st.session_state.topic_information['run_ranker'],
-                    fetch_all_by_date=False, # temporary, TODO reset to true
+                    fetch_all_by_date=True,
                 )
                 st.session_state.topic_information['count'] = count
                 st.session_state.topic_information['pmids'] = pmids
@@ -123,6 +127,10 @@ if len(st.session_state.topic_information.get('search_text', '')) > 0 and len(st
                 st.session_state.topic_information['screening_results'] = df
                 st.session_state.topic_information['last_searched'] = st.session_state.topic_information['search_query']
                 st.session_state.topic_information['execute_search'] = False
+                if count > 0:
+                    st.markdown(f'Retrieved {count} documents')
+                else:
+                    st.markdown(f'Retrieved 0 documents, try a less restrictive search.')
 
 if st.session_state.topic_information.get('df', None) is not None:
     st.markdown(f'Retrieved {len(st.session_state.topic_information["df"])} articles')
