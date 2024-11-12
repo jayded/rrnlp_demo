@@ -62,9 +62,14 @@ with st.form('Insert bulk screening results'):
 
 
 
-# TODO add a guardrail so this can't be finetuned too soon
-# TODO how to handle already screened results?
-if finetune_ranker := st.button('Finetune AutoRanker'):
+# TODO fix the guardrails
+# TODO somehow screening results aren't saved consistently on this side?
+counts = st.session_state.topic_information.get('counts', None)
+if counts is None:
+    counts = Counter(st.session_state.topic_information.get('screening_results', df)['human_decision'])
+    st.session_state.topic_information['counts'] = counts
+
+if finetune_ranker := st.button('Finetune AutoRanker', disabled=counts.get('Include', 0) == 0):
     with st.spinner('Finetuning the auto ranker and reranking (time for another coffee)'):
         database_utils.finetune_ranker(st.session_state.topic_information['topic_uid'])
 if st.button('Run AutoRanker (~1 minute / 5k)?') or finetune_ranker:
