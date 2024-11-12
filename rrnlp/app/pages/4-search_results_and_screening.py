@@ -99,12 +99,15 @@ else:
     screening_status = Counter(st.session_state.topic_information.get('screening_results', df)['human_decision'])
 st.markdown(f'Fetched {count} documents. {screening_status["Unscreened"]} Unscreened, {screening_status["Include"]} Include, and {screening_status["Exclude"]} Exclude decisions (may lag behind fast screening)')
 
-keep_columns = ['pmid', 'human_decision', 'robot_ranking', 'titles', 'abstracts']
+print(f'df columns {df.columns}')
+keep_columns = ['pmid', 'human_decision', 'robot_ranking', 'title', 'abstract']
 df = df[keep_columns]
 edit_columns = ['human_decision']
 frozen_columns = set(keep_columns) - set(edit_columns)
 
+abstracts_only = st.checkbox('Only articles with abstracts')
 screening_choice = st.radio('Show:', options=['All', 'Unscreened', 'Included', 'Excluded', 'Any processed'])
+old_choices = dict(zip(df['pmid'], df['human_decision']))
 match screening_choice:
     case 'Unscreened':
         display_df = df[df['human_decision'] == 'Unscreened']
@@ -116,6 +119,12 @@ match screening_choice:
         display_df = df[df['human_decision'] != 'Unscreened']
     case 'All' | _:
         display_df = df
+
+if abstracts_only:
+    display_df = display_df[~display_df['abstract'].isna()]
+    display_df = display_df[display_df['abstract'].apply(lambda x: len(x) > 0)]
+
+st.session_state.topic_information['current_screening']['pmids'] = list(display_df['pmid'])
 
 screening_results = st.data_editor(
     display_df,
