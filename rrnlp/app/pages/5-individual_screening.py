@@ -114,33 +114,43 @@ with column1:
     this_article = article_data_df[article_data_df['pmid'] == st.session_state.topic_information['current_screening']['current_pmid']]
     assert len(this_article) == 1
 
-    # TODO should this look like a pubmed page?
-    st.markdown(this_article['titles'].tolist()[0])
-    st.markdown(this_article['abstracts'].tolist()[0])
+    st.markdown(this_article['title'].tolist()[0])
+    st.markdown(this_article['abstract'].tolist()[0])
 
-    #evidence_map = database_utils.get_auto_evidence_map_from_pmids([st.session_state.topic_information['current_screening']['current_pmid']], include_only=False)
-    ico_re, extractions = database_utils.get_extractions_for_pmids([st.session_state.topic_information['current_screening']['current_pmid']])
+    ico_re, pio_df, extractions = database_utils.get_extractions_for_pmids([st.session_state.topic_information['current_screening']['current_pmid']])
     if len(ico_re) > 0:
-        st.dataframe(ico_re)
-    if len(extractions) > 0:
-        pio_df = extractions[['p', 'i', 'o']].melt(var_name='Variable', value_name='Value')
-        pio_df_rows = pio_df.to_dict(orient='records')
-        pio_df_rows = filter(lambda row: row['Value'] is not None, pio_df_rows)
-        pio_df_rows = map(lambda x: ({'Variable': x['Variable'], 'Value': v.strip()} for v in json.loads(x['Value'])), pio_df_rows)
-        pio_df_rows = itertools.chain.from_iterable(pio_df_rows)
-        pio_df_rows = map(frozendict.frozendict, pio_df_rows)
-        pio_df_rows = set(pio_df_rows)
-        pio_df = pd.DataFrame(pio_df_rows)
-        if len(pio_df) > 0:
-            st.dataframe(pio_df.sort_values(by=['Variable', 'Value']), hide_index=True, use_container_width=True)
-        # TODO delete any empty columns here?
-        study_df = extractions[['prob_rct', 'is_rct_sensitive', 'is_rct_balanced', 'is_rct_precise', 'prob_lob_rob', 'num_randomized', 'study_design', 'prob_sr', 'is_sr', 'prob_cohort', 'is_cohort', 'prob_consensus', 'is_consensus', 'prob_ct', 'is_ct', 'prob_ct_protocol', 'is_ct_protocol', 'prob_guideline', 'is_guideline', 'prob_qual', 'is_qual']].melt(var_name='Variable', value_name='Value')
-        study_df['Value'] = study_df['Value'].apply(lambda x: f"{x:,.3f}" if isinstance(x, float) else str(x))
-        study_df = study_df.to_dict(orient='records')
-        study_df = map(frozendict.frozendict, study_df)
-        study_df = set(study_df)
-        study_df = pd.DataFrame(study_df).sort_values(by='Variable')
+        del ico_re['index']
+        del ico_re['pmid']
+        st.markdown('Study Arms and Measures')
+        st.dataframe(ico_re, hide_index=True, use_container_width=True)
 
+    if len(pio_df) > 0:
+        col1, col2 = st.columns([.6, .4])
+        del pio_df['index']
+        del pio_df['pmid']
+        mesh_rows = pio_df['type'].apply(lambda x: 'mesh' in x)
+        pio_mesh = pio_df[mesh_rows]
+        pio_extractions = pio_df[~mesh_rows]
+        with col1:
+            if len(pio_extractions) > 0:
+                st.markdown('Participant, Intervention, Outcome extractions')
+                del pio_extractions['mesh_term']
+                del pio_extractions['mesh_ui']
+                del pio_extractions['cui']
+                st.dataframe(pio_extractions, hide_index=True, use_container_width=True)
+        with col2:
+            if len(pio_mesh) > 0:
+                st.markdown('PIO MeSH Extractions')
+                del pio_mesh['value']
+                st.dataframe(pio_mesh, hide_index=True, use_container_width=True)
+    study_df = extractions.melt(var_name='Variable', value_name='Value')
+    study_df = study_df.to_dict(orient='records')
+    study_df = map(frozendict.frozendict, study_df)
+    study_df = set(study_df)
+    study_df = pd.DataFrame(study_df).sort_values(by='Variable')
+
+    if len(study_df) > 0:
+        st.markdown('Study information')
         st.dataframe(
             study_df,
             hide_index=True,
