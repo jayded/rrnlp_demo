@@ -93,9 +93,10 @@ with column1:
 
     if 'current_pmid' not in st.session_state.topic_information['current_screening']:
         if len(st.session_state.topic_information['current_screening']['pmids']) > 0:
-            st.session_state.topic_information['current_screening']['current_pmid'] = st.session_state.topic_information['current_screening']['pmids'].pop()
+            st.session_state.topic_information['current_screening']['current_pmid'] = st.session_state.topic_information['current_screening']['pmids'].pop(0)
+            print(f"Selected new pmid {st.session_state.topic_information['current_screening']['current_pmid']}")
         else:
-            st.markdown('No more pmids to screen!')
+            st.markdown('No more pmids to screen! (Review your selections on the bulk screening page)')
 
             st.stop()
 
@@ -105,7 +106,7 @@ with column1:
     while this_article_data_len == 0:
         print(f"Skipping {st.session_state.topic_information['current_screening']['current_pmid']}")
 
-        st.session_state.topic_information['current_screening']['current_pmid'] = st.session_state.topic_information['current_screening']['pmids'].pop()
+        st.session_state.topic_information['current_screening']['current_pmid'] = st.session_state.topic_information['current_screening']['pmids'].pop(0)
         this_article = article_data_df[article_data_df['pmid'] == st.session_state.topic_information['current_screening']['current_pmid']]
         this_article_data_len = len(this_article)
 
