@@ -23,6 +23,13 @@ if st.session_state.topic_information['final'] != 1:
 if not st.session_state.get('loaded_config', False):
     database_utils.load_config()
 
+if 'current_screening' not in st.session_state.topic_information:
+    st.session_state.topic_information['current_screening'] = {}
+
+# reset the current pmid every time because the list can change from either side
+if 'current_pmid' in st.session_state.topic_information['current_screening']:
+    del st.session_state.topic_information['current_screening']['current_pmid']
+
 print('bulk screening')
 for x in ['topic_name', 'topic_uid', 'search_text', 'search_query', 'generated_query', 'used_cochrane_filter', 'used_robot_reviewer_rct_filter', 'final']:
     print(x, st.session_state.topic_information.get(x, 'none'))
