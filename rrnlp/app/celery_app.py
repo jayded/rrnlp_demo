@@ -7,13 +7,21 @@ import time
 from os.path import abspath, dirname
 from typing import List
 
+import yaml
+
 from celery import Celery
+from yaml.loader import SafeLoader
 
 #from rrnlp.app.utils import get_searcher
 import rrnlp.models.SearchBot as SearchBot
 import rrnlp.models.MultiSummaryGenerationBot as MultiSummaryGenerationBot
 
 
+config_file = '/data/ei_demo/RRnlp/rrnlp/app/demo_pw.yml'
+#config_file = sys.argv[1]
+with open(config_file, 'r', encoding='utf-8') as file:
+    config = yaml.load(file, Loader=SafeLoader)
+# TODO real config for this somehow
 base_dir = dirname(dirname(dirname(abspath(__file__))))
 sqlite_path = f'sqlalchemy+sqlite:////{base_dir}/broker.sqlite3'
 result_backend = f'db+sqlite:////{base_dir}/backend.sqlite3'
@@ -61,7 +69,9 @@ def setup_text_generation(sender, **kwargs):
         get_searcher_end = time.time()
         logging.info(f'loading the searcher took {get_searcher_end - get_searcher_start} seconds')
         get_summarizer_start = time.time()
-        mds_summarizer = MultiSummaryGenerationBot.load_mds_summary_bot()
+        logging.info(f'loading key from {config["openai_api_key"]}')
+        mds_summarizer = MultiSummaryGenerationBot.load_openai_summary_bot(api_key_file = config['openai_api_key'])
+        #mds_summarizer = MultiSummaryGenerationBot.load_mds_summary_bot()
         get_summarizer_end = time.time()
         logging.info(f'loading the mds summarizer took {get_summarizer_end - get_summarizer_start} seconds')
         _model_loaded = True
@@ -72,17 +82,17 @@ def generate_search(search_text):
     #with app.search_semaphore:
     query = searcher.generate_review_topic(search_text)
     generate_end = time.time()
-    logging.info(f'generating the query took {generate_end - generate_start} seconds')
+    logging.info(f'generating the query took {generate_end - generate_start} seconds: {query}')
     return query
  
 @app.task
 def mds_summarize(search_text, input_texts: List[str]):
     generate_start = time.time()
     #with app.search_semaphore:
-    query = mds_summarizer.predict_for_docs(search_text, input_texts)
+    summary, response = mds_summarizer.predict_for_docs(search_text, input_texts)
     generate_end = time.time()
-    logging.info(f'generating the query took {generate_end - generate_start} seconds')
-    return query
+    logging.info(f'generating the summary took {generate_end - generate_start} seconds')
+    return summary
     
 ## Other RRNlp generations
 #@app.task
