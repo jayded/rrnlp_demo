@@ -120,15 +120,19 @@ with column1:
 
     ico_re, pio_df, extractions = database_utils.get_extractions_for_pmids([st.session_state.topic_information['current_screening']['current_pmid']])
     if len(ico_re) > 0:
-        del ico_re['index']
-        del ico_re['pmid']
+        # a typo was made
+        if 'cvidence' in ico_re.columns:
+            del ico_re['evidence']
+            ico_re = ico_re.rename(mapper={'cvidence': 'evidence'}, axis=1)
+        if 'pmid' in ico_re.columns:
+            del ico_re['pmid']
         st.markdown('Study Arms and Measures')
         st.dataframe(ico_re, hide_index=True, use_container_width=True)
 
     if len(pio_df) > 0:
         col1, col2 = st.columns([.6, .4])
-        del pio_df['index']
-        del pio_df['pmid']
+        if 'pmid' in pio_df.columns:
+            del pio_df['pmid']
         mesh_rows = pio_df['type'].apply(lambda x: 'mesh' in x)
         pio_mesh = pio_df[mesh_rows]
         pio_extractions = pio_df[~mesh_rows]
@@ -144,11 +148,15 @@ with column1:
                 st.markdown('PIO MeSH Extractions')
                 del pio_mesh['value']
                 st.dataframe(pio_mesh, hide_index=True, use_container_width=True)
+    if 'pmid' in extractions.columns:
+        del extractions['pmid']
     study_df = extractions.melt(var_name='Variable', value_name='Value')
     study_df = study_df.to_dict(orient='records')
     study_df = map(frozendict.frozendict, study_df)
     study_df = set(study_df)
     study_df = pd.DataFrame(study_df).sort_values(by='Variable')
+    study_df = study_df.dropna()
+    study_df = study_df[study_df['Value'].apply(lambda x: isinstance(x, str) and len(x.strip()) > 0 and x != '""')]
 
     if len(study_df) > 0:
         st.markdown('Study information')

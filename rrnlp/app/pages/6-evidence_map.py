@@ -17,8 +17,12 @@ if st.session_state.topic_information['final'] != 1:
 if not st.session_state.get('loaded_config', False):
     database_utils.load_config()
 
-included_documents_only = st.checkbox('Included Documents Only?')
+included_documents_only = st.checkbox('Included Documents Only?', key='IncludedOnly')
 all_included_pmids, ico_re, picos, article_data = database_utils.get_auto_evidence_map_from_topic_uid(st.session_state.topic_information['topic_uid'], included_documents_only=included_documents_only)
+
+if 'cvidence' in ico_re.columns:
+    del ico_re['evidence']
+    ico_re = ico_re.rename(mapper={'cvidence': 'evidence'}, axis=1)
 
 for df in [ico_re, picos, article_data]:
     if 'index' in df:

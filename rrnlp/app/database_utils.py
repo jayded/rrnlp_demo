@@ -304,13 +304,13 @@ def run_robot_ranker(topic_uid):
     # TODO active learning storage?
     start_time = time.time()
     cur = get_db(False, pragma_cmd=PRAGMA_WAL)
-    res = cur.execute('''select search_text from user_topics where user_db.topic_uid=?''', (topic_uid,))
+    res = cur.execute('''select search_text from user_db.user_topics where topic_uid=?''', (topic_uid,))
     topic = res.fetchone()[0]
 
     res = cur.execute('''
-        SELECT pmid FROM user_db.search_screening_results
-        WHERE user_db.search_screening_results.topic_uid LIKE ?
-        ORDER BY user_db.search_screening_results.robot_ranking DESC
+        SELECT pmid FROM user_db.search_screening_results screening
+        WHERE screening.topic_uid LIKE ?
+        ORDER BY screening.robot_ranking DESC
     ''', (topic_uid,))
     pmids = res.fetchall()
     pmids = [x[0] for x in pmids]
@@ -433,14 +433,14 @@ def get_auto_evidence_map_from_topic_uid(topic_uid, included_documents_only):
     '''
     included_pmids = set([x['pmid'] for x in cur.execute(query).fetchall()])
     if included_documents_only:
-        clause = 'WHERE screening.human_decision = "Include"'
+        clause = f'WHERE screening.human_decision = "Include" AND screening.topic_uid = {topic_uid}'
     else:
-        clause = ''
+        clause = f'WHERE screening.topic_uid = {topic_uid}'
+          #screening.robot_ranking,
     query = f'''
         SELECT
-          article_data.pmid,
+          screening.pmid,
           screening.human_decision,
-          screening.robot_ranking,
           article_data.title,
           article_data.abstract,
           article_data.journal,
@@ -449,12 +449,8 @@ def get_auto_evidence_map_from_topic_uid(topic_uid, included_documents_only):
           article_data.keywords,
           article_data.is_rct,
           article_data.prob_rct,
-          study_bot.study_design,
-          study_bot.is_rct,
-          study_bot.prob_rct,
-          study_bot.prob_low_rob,
           study_bot.num_randomized,
-          study_design,
+          study_bot.study_design,
           study_bot.prob_sr,
           study_bot.is_sr,
           study_bot.prob_cohort,
@@ -469,8 +465,6 @@ def get_auto_evidence_map_from_topic_uid(topic_uid, included_documents_only):
           study_bot.is_guideline,
           study_bot.prob_qual,
           study_bot.is_qual,
-          study_bot.is_rct,
-          study_bot.rct_bot_is_rct,
           study_bot.rct_bot_is_rct_sensitive,
           study_bot.rct_bot_is_rct_balanced,
           study_bot.rct_bot_is_rct_precise
@@ -480,12 +474,14 @@ def get_auto_evidence_map_from_topic_uid(topic_uid, included_documents_only):
             pubmed_db.article_data article_data
         ON
             screening.pmid = article_data.pmid
-        LEFT JOIN
+        INNER JOIN
             pubmed_db.study_design_bot study_bot
         ON
-            article_data.pmid = study_bot.pmid
+            screening.pmid = study_bot.pmid
         {clause}
+        GROUP BY screening.pmid, screening.human_decision
     '''
+
     res = cur.execute(query)
     extractions = res.fetchall()
     extractions = pd.DataFrame.from_records(extractions)
