@@ -37,13 +37,13 @@ if len(all_included_pmids) == 0:
 if len(article_data) == 0:
     st.markdown(f'No article level extractions!')
 else:
-    st.markdown(f'Results for {len(article_data)}')
+    st.markdown(f'Results for {len(article_data)} documents')
     st.dataframe(article_data, hide_index=True, use_container_width=True)
 
 if len(ico_re) == 0:
     st.markdown('No extracted study arms or measures')
 else:
-    st.markdown('Study Arms and Measures')
+    st.markdown('Study Arms, Measures, and Findings')
     st.dataframe(ico_re, hide_index=True, use_container_width=True)
 
 if len(picos) == 0:

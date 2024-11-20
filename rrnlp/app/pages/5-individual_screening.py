@@ -34,41 +34,15 @@ def insert(pmid, decision):
     database_utils.insert_topic_human_screening_pubmed_results(st.session_state.topic_information['topic_uid'], {pmid: decision})
     df = st.session_state.topic_information['df']
     # this line is to keep state with the bigger screening dataframe. It's our (local) source of truth.
-    df.loc[df['pmid'] == pmid, 'human_decision'] = decision
+    df.loc[pmid, 'human_decision'] = decision
+    for decision in ['Include', 'Exclude']:
+        print(decision, df[df['human_decision'] == decision].index.values.tolist())
 
 # Note to any future developers:
 # - the order here is important due to streamlit's execution order.
 # - First the page executes, and there have been no decisions
 # - then when someone makes a selection, the page re-executes
 # - by having all the logic of fetching the next topic and information happen _after_ the button actions execute, we can get the next article ready.
-with column2:
-    include = st.button(
-        'Include',
-        use_container_width=True,
-        icon=":material/thumb_up:",
-        on_click=lambda: insert(st.session_state.topic_information['current_screening']['current_pmid'], 'Include'),
-    )
-    exclude = st.button(
-        'Exclude',
-        use_container_width=True,
-        icon=":material/thumb_down:",
-        on_click=lambda: insert(st.session_state.topic_information['current_screening']['current_pmid'], 'Exclude'),
-    )
-    skip = st.button(
-        'Skip',
-        use_container_width=True,
-        icon=":material/question_mark:",
-    )
-
-    if include or exclude or skip:
-        st.session_state.topic_information['current_screening']['screened'].add(st.session_state.topic_information['current_screening']['current_pmid'])
-        del st.session_state.topic_information['current_screening']['current_pmid']
-
-    if st.button("Return to bulk screening", use_container_width=True):
-        st.switch_page('pages/4-search_results_and_screening.py')
-
-    if st.button("View Evidence Map", use_container_width=True):
-        st.switch_page('pages/6-evidence_map.py')
 
 with column1:
     if 'pmids' not in st.session_state.topic_information['current_screening'] or len(st.session_state.topic_information['current_screening']['pmids']) == 0:
@@ -79,13 +53,13 @@ with column1:
         df = st.session_state.topic_information['df']
         df_ = df[df['human_decision'] == 'Unscreened']
 
-        to_screen_pmids = df_['pmid'].tolist()
+        to_screen_pmids = df_.index.values.tolist()
         # remove duplicates but retain order
         to_screen_pmids = list({x:x for x in to_screen_pmids}.keys())
         st.session_state.topic_information['current_screening']['pmids'] = to_screen_pmids
 
     df = st.session_state.topic_information['df']
-    st.session_state.topic_information['current_screening']['screened'].update(df[df['human_decision'] != 'Unscreened']['pmid'])
+    st.session_state.topic_information['current_screening']['screened'].update(df[df['human_decision'] != 'Unscreened'].index.values)
     article_data_df = st.session_state.topic_information['article_data_df']
 
     if 'current_pmid' in st.session_state.topic_information['current_screening'] and st.session_state.topic_information['current_screening']['current_pmid'] in st.session_state.topic_information['current_screening']['screened']:
@@ -167,3 +141,34 @@ with column1:
         )
 
 
+with column2:
+    include = st.button(
+        'Include',
+        use_container_width=True,
+        icon=":material/thumb_up:",
+        on_click=lambda: insert(st.session_state.topic_information['current_screening']['current_pmid'], 'Include'),
+        key=f"include{st.session_state.topic_information['current_screening']['current_pmid']}",
+    )
+    exclude = st.button(
+        'Exclude',
+        use_container_width=True,
+        icon=":material/thumb_down:",
+        on_click=lambda: insert(st.session_state.topic_information['current_screening']['current_pmid'], 'Exclude'),
+        key=f"exclude{st.session_state.topic_information['current_screening']['current_pmid']}",
+    )
+    skip = st.button(
+        'Skip',
+        use_container_width=True,
+        icon=":material/question_mark:",
+        key=f"skip{st.session_state.topic_information['current_screening']['current_pmid']}",
+    )
+
+    if include or exclude or skip:
+        st.session_state.topic_information['current_screening']['screened'].add(st.session_state.topic_information['current_screening']['current_pmid'])
+        del st.session_state.topic_information['current_screening']['current_pmid']
+
+    if st.button("Return to bulk screening", use_container_width=True):
+        st.switch_page('pages/4-search_results_and_screening.py')
+
+    if st.button("View Evidence Map", use_container_width=True):
+        st.switch_page('pages/6-evidence_map.py')
