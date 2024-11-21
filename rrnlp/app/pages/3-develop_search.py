@@ -120,6 +120,7 @@ if len(st.session_state.topic_information.get('search_text', '')) > 0 and len(st
                     run_ranker=st.session_state.topic_information['run_ranker'],
                     fetch_all_by_date=True,
                 )
+                df.set_index('pmid', drop=True, inplace=True)
                 st.session_state.topic_information['count'] = count
                 st.session_state.topic_information['pmids'] = pmids
                 st.session_state.topic_information['article_data_df'] = article_data_df
@@ -139,9 +140,14 @@ if st.session_state.topic_information.get('df', None) is not None:
     if st.button('Finalize search and begin screening?'):
         st.session_state.topic_information['final'] = 1
         finalize = 1
+        if 'pmid' in st.session_state.topic_information['df'].columns:
+            pmids = st.session_state.topic_information['df']['pmid']
+        else:
+            pmids = st.session_state.topic_information['df'].index.tolist()
+
         database_utils.insert_unscreened_pmids(
             topic_uid=st.session_state.topic_information['topic_uid'],
-            pmids=st.session_state.topic_information['df']['pmid'],
+            pmids=pmids,
             ranks=st.session_state.topic_information['df']['robot_ranking'] if 'robot_ranking' in st.session_state.topic_information['df'].columns else None,
         )
         database_utils.write_topic_info(
