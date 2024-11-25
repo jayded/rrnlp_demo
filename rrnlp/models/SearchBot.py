@@ -34,8 +34,8 @@ weights = '/data/ei_demo/gaelen_stuff/Review_title_merged/'
 def get_topic_to_pubmed_converter(
         weights=weights,
         tokenizer='mistralai/Mistral-7B-Instruct-v0.2',
-        device='auto'
-    ) -> Tuple[AutoModelForCausalLM, AutoTokenizer]:
+        device='auto',
+    ):
     '''
     Returns the 'punchline' extractor, which seeks out sentences that seem to convey
     main findings.
@@ -119,6 +119,8 @@ class PubmedQueryGeneratorBot:
             device=self.query_generator.device,
             return_tensors='pt'
         )
+        title_inputs = title_inputs.to(self.query_generator.device)
+        print('devices', self.query_generator.device, title_inputs.device)
         #import ipdb; ipdb.set_trace()
         titlequery = self.query_generator.generate(
             input_ids=title_inputs,
