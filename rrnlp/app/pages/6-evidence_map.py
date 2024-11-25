@@ -17,7 +17,9 @@ if st.session_state.topic_information['final'] != 1:
 if not st.session_state.get('loaded_config', False):
     database_utils.load_config()
 
-included_documents_only = st.checkbox('Included Documents Only?', key='IncludedOnly')
+included_documents_only = st.checkbox('Included Documents Only?', key='IncludedOnly', value=st.session_state.topic_information.get('IncludedOnly', True))
+st.session_state.topic_information['IncludedOnly'] = included_documents_only
+# TODO should this be indexed by pmid?
 all_included_pmids, ico_re, picos, article_data = database_utils.get_auto_evidence_map_from_topic_uid(st.session_state.topic_information['topic_uid'], included_documents_only=included_documents_only)
 
 if 'cvidence' in ico_re.columns:
