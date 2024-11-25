@@ -6,6 +6,8 @@ import pandas as pd
 import streamlit as st
 st.set_page_config(page_title='Search Results and Screening', layout='wide')
 
+from markupsafe import escape
+
 import rrnlp.models.SearchBot as SearchBot
 
 import rrnlp.app.database_utils as database_utils
@@ -29,6 +31,7 @@ if 'current_screening' not in st.session_state.topic_information:
 # reset the current pmid every time because the list can change from either side
 if 'current_pmid' in st.session_state.topic_information['current_screening']:
     del st.session_state.topic_information['current_screening']['current_pmid']
+    del st.session_state.topic_information['current_screening']['pmids']
 
 print('bulk screening')
 for x in ['topic_name', 'topic_uid', 'search_text', 'search_query', 'generated_query', 'used_cochrane_filter', 'used_robot_reviewer_rct_filter', 'final']:
@@ -36,9 +39,8 @@ for x in ['topic_name', 'topic_uid', 'search_text', 'search_query', 'generated_q
 
 cochrane_filter = SearchBot.PubmedQueryGeneratorBot.rct_filter()
 
-# TODO don't use the copies when they can be avoided
 search_query = st.session_state.topic_information['search_query']
-st.markdown(f'Results for: {search_query}' + (f' AND <pre>{cochrane_filter}</pre>' if st.session_state.topic_information.get('used_cochrane_filter', 0) == 1 else ''))
+st.markdown(f'Results for: {search_query}' + (f' AND {escape(cochrane_filter)}' if st.session_state.topic_information.get('used_cochrane_filter', 0) == 1 else ''))
 st.write('No more search results can be added via pubmed searches. Add any others manually:')
 with st.form('Insert bulk screening results'):
     st.markdown('Insert a list of pmids to Include. Use spaces or commas to separate them')
@@ -102,13 +104,14 @@ if finetune_ranker := st.button('Finetune AutoRanker', disabled=counts.get('Incl
 if st.button('Run AutoRanker (~1 minute / 5k)?') or finetune_ranker:
     database_utils.run_robot_ranker(st.session_state.topic_information['topic_uid'])
 
-st.markdown(f'Fetched {count} documents. {counts["Unscreened"]} Unscreened, {counts["Include"]} Include, and {counts["Exclude"]} Exclude decisions (may lag behind fast screening)')
+st.markdown(f'Fetched {count} documents.')
 
 edit_columns = ['human_decision']
 frozen_columns = set(keep_columns) - set(edit_columns)
 
 display_df = df
-abstracts_only = st.checkbox('Only articles with abstracts?', key='Article Filter')
+abstracts_only = st.checkbox('Only articles with abstracts?', key='Article Filter', value=st.session_state.topic_information.get('abstracts_only', True))
+st.session_state.topic_information['abstracts_only'] = abstracts_only
 #screening_choice = st.radio('Show:', options=['All', 'Unscreened', 'Included', 'Excluded', 'Any processed'])
 #match screening_choice:
 #    case 'Unscreened':
@@ -126,7 +129,8 @@ if abstracts_only:
     display_df = display_df[~display_df['abstract'].isna()]
     display_df = display_df[display_df['abstract'].apply(lambda x: len(x) > 0)]
 
-st.session_state.topic_information['current_screening']['pmids'] = display_df.index.values.tolist()
+st.session_state.topic_information['current_screening']['pmids'] = display_df[display_df['human_decision'] == 'Unscreened'].index.values.tolist()
+st.session_state.topic_information['current_screening']['current_pmids'] = display_df.index.values.tolist()
 
 def onchange():
     pmids = display_df.index.values.tolist()
@@ -135,7 +139,7 @@ def onchange():
     df_ = st.session_state.topic_information['df']
     for position, row_change in screening.items():
         decision = row_change['human_decision'] 
-        pmid = df.iloc[position].name
+        pmid = st.session_state.topic_information['current_screening']['current_pmids'][position]
         old_choice = df_.loc[pmid, 'human_decision']
         #print(position, pmid, old_choice, '->', decision)
         pmid_to_val[pmids[position]] = row_change['human_decision']

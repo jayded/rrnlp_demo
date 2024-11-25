@@ -81,6 +81,7 @@ with column1:
         print(f"Skipping {st.session_state.topic_information['current_screening']['current_pmid']}")
 
         st.session_state.topic_information['current_screening']['current_pmid'] = st.session_state.topic_information['current_screening']['pmids'].pop(0)
+        print(f"Selected new pmid {st.session_state.topic_information['current_screening']['current_pmid']} (last article had no information)")
         this_article = article_data_df[article_data_df['pmid'] == st.session_state.topic_information['current_screening']['current_pmid']]
         this_article_data_len = len(this_article)
 
@@ -164,6 +165,13 @@ with column2:
     )
 
     if include or exclude or skip:
+        if include:
+            st.session_state.topic_information['counts']['Include'] += 1
+            st.session_state.topic_information['counts']['Unscreened'] -= 1
+        if exclude:
+            st.session_state.topic_information['counts']['Exclude'] += 1
+            st.session_state.topic_information['counts']['Unscreened'] -= 1
+
         st.session_state.topic_information['current_screening']['screened'].add(st.session_state.topic_information['current_screening']['current_pmid'])
         del st.session_state.topic_information['current_screening']['current_pmid']
 
