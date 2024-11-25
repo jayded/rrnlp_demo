@@ -32,9 +32,9 @@ if not st.session_state.get('loaded_config', False):
 # for development
 
 @st.cache_data
-def generate_search(search_text):
+def page_generate_search(search_text):
     generate_start = time.time()
-    print('generating search', search_text)
+    print(f'generating search: "{search_text}"')
     query = celery_generate_search(search_text)
     generate_end = time.time()
     print(f'generating the query took {generate_end - generate_start} seconds')
@@ -64,7 +64,7 @@ with st.form("search_form"):
         else:
             with st.spinner('Generating search'):
                 st.markdown('Generating the search may take a moment, now is a good time to fetch a coffee')
-                query = generate_search(new_search_text)
+                query = page_generate_search(new_search_text)
                 st.session_state.topic_information['generated_query'] = query
                 st.session_state.topic_information['search_text'] = new_search_text
         #query = '(statins [heart OR cardiovascular] AND ("impact" OR "effect" OR "benefit"))'
@@ -173,6 +173,7 @@ if st.session_state.topic_information.get('df', None) is not None:
             'pmid': st.column_config.TextColumn(
                 'PMID',
                 help='pubmed ID',
+                width='small',
             ),
             # TODO should probably remove this?
             'human_decision': st.column_config.SelectboxColumn(
@@ -183,10 +184,12 @@ if st.session_state.topic_information.get('df', None) is not None:
                     'Include',
                     'Exclude'
                 ],
+                width='small',
             ),
             'robot_ranking': st.column_config.NumberColumn(
                 'AutoRank',
                 help='AutoRanker Results',
+                width='small',
             ),
             'titles': st.column_config.TextColumn(
                 'Title',

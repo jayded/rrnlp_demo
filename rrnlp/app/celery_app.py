@@ -92,8 +92,8 @@ class MDSSummarizer(Task):
         logging.info(f'generating the summary took {generate_end - generate_start} seconds')
         return summary
 
-@app.task(name='mds_summarize', acks_late=False)
-def mds_summarize(self, search_text, input_texts: List[str]):
+@app.task(base=MDSSummarizer, name='mds_summarize', acks_late=False, bind=True)
+def mds_summarize(self: Task, search_text, input_texts: List[str]):
     return self.compute(search_text, input_texts)
 
 if __name__ == '__main__':
