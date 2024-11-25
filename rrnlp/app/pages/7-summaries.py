@@ -19,6 +19,7 @@ st.markdown(f'Automatically generated summary for {st.session_state.topic_inform
 
 # TODO these dataframes should be specific to the summarization
 count, pmids, article_data_df, df = database_utils.get_persisted_pubmed_search_and_screening_results(st.session_state.topic_information['topic_uid'])
+df.set_index('pmid', drop=True, inplace=True)
 st.session_state.topic_information['count'] = count
 st.session_state.topic_information['pmids'] = pmids
 st.session_state.topic_information['article_data_df'] = article_data_df
