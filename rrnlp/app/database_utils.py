@@ -474,7 +474,7 @@ def get_auto_evidence_map_from_topic_uid(topic_uid, included_documents_only):
             pubmed_db.article_data article_data
         ON
             screening.pmid = article_data.pmid
-        INNER JOIN
+        LEFT JOIN
             pubmed_db.study_design_bot study_bot
         ON
             screening.pmid = study_bot.pmid
