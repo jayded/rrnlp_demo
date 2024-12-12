@@ -405,7 +405,7 @@ def insert_topic_human_screening_pubmed_results(topic_uid, pmid_to_human_screeni
         VALUES(:ti, :pm, :hs, :src)
         ON CONFLICT(topic_uid, pmid)
         DO UPDATE SET human_decision=:hs
-    ''', [{'hs': human, 'ti': topic_uid, 'pm': pmid, 'src': source} for (pmid, human) in pmid_to_human_screening.items()])
+    ''', [{'hs': human, 'ti': topic_uid, 'pm': pmid, 'src': source} for (pmid, human) in filter(lambda x: len(x[0]) > 0, pmid_to_human_screening.items())])
     cur.commit()
     close_db(cur)
 
