@@ -17,7 +17,7 @@ import rrnlp.models.SearchBot as SearchBot
 import rrnlp.models.MultiSummaryGenerationBot as MultiSummaryGenerationBot
 
 
-config_file = '/data/ei_demo/RRnlp/rrnlp/app/demo_pw.yml'
+config_file = '/home/ubuntu/rrnlp-demo/RRnlp/rrnlp/app/demo_pw.yml'
 #config_file = sys.argv[1]
 with open(config_file, 'r', encoding='utf-8') as file:
     config = yaml.load(file, Loader=SafeLoader)

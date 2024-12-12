@@ -18,7 +18,7 @@ from rrnlp.models import get_device
 
 #weights_path = rrnlp.models.weights_path
 # TODO
-weights = '/data/ei_demo/flan_t5_large_adamw_hf_steps10000_lr1e-4'
+weights = '/home/ubuntu/rrnlp-demo/flan_t5_large_adamw_hf_steps10000_lr1e-4'
 default_instruct_file = os.path.join(os.path.dirname(__file__), 'MultiSummaryGenerationExample.json')
 
 def load_openai_summary_bot(
