@@ -10,6 +10,8 @@ from typing import Dict, List, Tuple, Type
 import copy
 import warnings
 
+import torch
+
 import rrnlp
 
 from .models import (
@@ -131,16 +133,23 @@ class TrialReader:
             for task in task_list:
                 # skip the task if we have already done it
                 if task not in return_dict or task == 'ico_ev_bot':
-                    if self.dynamically_switch_to_gpu and self.models[task].supports_gpu():
+                    if self.dynamically_switch_to_gpu and self.models[task].supports_gpu() and torch.cuda.is_available():
                         self.models[task].to('cuda')
                     return_dict[task] = self.models[task].predict_for_ab(ab)
-                    if self.dynamically_switch_to_gpu and self.models[task].supports_gpu():
+                    # TODO get an estimate of memory required
+                    if self.dynamically_switch_to_gpu \
+                        and self.models[task].supports_gpu() \
+                        and torch.cuda.is_available() \
+                        and torch.cuda.get_device_properties(0).total_memory < 36000:
                         self.models[task].to('cpu')
             if perform_numerical_extraction and 'numerical_extraction_bot' not in return_dict:
-                if self.dynamically_switch_to_gpu and self.models['numerical_extraction_bot'].supports_gpu():
+                if self.dynamically_switch_to_gpu and self.models['numerical_extraction_bot'].supports_gpu() and torch.cuda.is_available():
                     self.models['numerical_extraction_bot'].to('cuda')
                 return_dict['numerical_extraction_bot'] = self.models['numerical_extraction_bot'].predict_for_ab(ab, return_dict['ico_ev_bot'])
-                if self.dynamically_switch_to_gpu and self.models['numerical_extraction_bot'].supports_gpu():
+                if self.dynamically_switch_to_gpu \
+                    and self.models['numerical_extraction_bot'].supports_gpu() \
+                    and torch.cuda.is_available() \
+                    and torch.cuda.get_device_properties(0).total_memory < 36000:
                     self.models['numerical_extraction_bot'].to('cpu')
 
         return return_dict
