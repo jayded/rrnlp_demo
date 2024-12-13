@@ -49,9 +49,8 @@ with st.form('Insert bulk screening results'):
     exclude_pmids = st.text_area('Exclude pmids', value='', height=20)
     submitted = st.form_submit_button("Insert")
     if submitted:
-        include_pmids = set(itertools.chain.from_iterable([map(str.strip, x.split(',')) for x in include_pmids.split()]))
-        exclude_pmids = set(itertools.chain.from_iterable([map(str.strip, x.split(',')) for x in exclude_pmids.split()]))
-        # TODO rerun screening if there were any before?
+        include_pmids = set(itertools.chain.from_iterable([map(str.strip, x.split()) for x in include_pmids.split(',')]))
+        exclude_pmids = set(itertools.chain.from_iterable([map(str.strip, x.split()) for x in exclude_pmids.split(',')]))
         if len(include_pmids & exclude_pmids) > 0:
             st.markdown(f'Warning: no ids inserted, you have duplicates: {include_pmids & exclude_pmids}')
         else:
