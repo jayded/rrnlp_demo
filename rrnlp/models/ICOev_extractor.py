@@ -56,7 +56,22 @@ class ICOBot:
         for dev_row, output in zip([input_text], outputs):
             out = self.tokenizer.decode(output, skip_special_tokens=True)
             try:
-                decoded = ast.literal_eval(out)
+                try:
+                    decoded = ast.literal_eval(out)
+                except Exception as eo:
+                    # occasionally parsing fails when apostraphes are present in the inputs, so we modify the inputs and try again
+                    # this drastically decreases the total number of failures
+                    # the remaining number are largely due to a combination of (in no particular order):
+                    # (a) fun cases where the input is gibberish and the model can't seem to handle that (e.g. chemical names)
+                    # (b) cases where many apostraphes are present in the name
+                    # (c) productions cut short because we are miserly on computation time or memory budget.
+                    original = out
+                    out = out.replace('"', '\\"')
+                    out = out.replace("['", '["')
+                    out = out.replace("']", '"]')
+                    out = out.replace("', '", '", "')
+                    out = out.replace("','", '","')
+                    decoded = ast.literal_eval(out)
                 if len(decoded) == 0:
                     print(f'No ICO/Evidence relations found for {dev_row}')
                 for production in decoded:
@@ -75,9 +90,7 @@ class ICOBot:
                     res.append(ico_tuplet)
             except Exception as e:
                 res.append({'production': out})
-                print("Error in decoding: ", out)
-                print("Error in decoding: ", e)
-                print("Error in decoding: ", dev_row)
+                print("Error in decoding: ", dev_row, e)
         return res
 
     def supports_gpu(self) -> bool:
