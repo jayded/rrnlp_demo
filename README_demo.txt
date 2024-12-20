@@ -1,6 +1,4 @@
-# augment the result of Somin's project with some additional tables:
-sqlite> CREATE TABLE search_screening_results(topic_uid, pmid, human_decision TEXT DEFAULT "Unscreened", robot_ranking REAL DEFAULT NULL, source TEXT DEFAULT NULL, UNIQUE(topic_uid, pmid));
-sqlite> CREATE TABLE user_topics(topic_uid INTEGER PRIMARY KEY AUTOINCREMENT UNIQUE, uid INTEGER, topic_name, search_text, search_query);
+# Get a Huggingface token and copy it to ~/.cache/huggingface/token
 
 # Create a database of pubmed meta-data
 This will have to be repeated with each update! Annoying but a reasonably compromise at the moment.

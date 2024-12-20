@@ -31,7 +31,7 @@ from .models import (
 
 class ReviewBot:
     task_loaders = {
-        'search_bot': SearchBot.get_search_bot,
+        'search_bot': SearchBot.get_topic_to_pubmed_converter,
         'screener_bot': ScreenerBot.load_screener,
         'mds_summary_bot': MultiSummaryGenerationBot.load_mds_summary_bot,
     }

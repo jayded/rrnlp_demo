@@ -1,11 +1,16 @@
 import time
+
 import streamlit as st
+
+from markupsafe import escape
+
 st.set_page_config(page_title='Search Development', layout='wide')
 
-from rrnlp.app.utils import get_searcher
 import rrnlp.app.database_utils as database_utils
 #from database_utils import get_next_topic_uid
 import rrnlp.models.SearchBot as SearchBot
+
+from rrnlp.app.celery_app import generate_search as celery_generate_search
 
 # manage what page we're on
 if 'uid' not in st.session_state:
@@ -25,21 +30,12 @@ if not st.session_state.get('loaded_config', False):
 
 # speed up loading, so this only happens once.
 # for development
-get_searcher_start = time.time()
-searcher = get_searcher()
-get_searcher_end = time.time()
-print(f'getting the searcher took {get_searcher_end - get_searcher_start} seconds')
 
 @st.cache_data
-def generate_search(search_text):
-    print('getting searcher')
-    get_searcher_start = time.time()
-    searcher = get_searcher()
-    get_searcher_end = time.time()
-    print(f'getting the searcher took {get_searcher_end - get_searcher_start} seconds')
-    print(f'generating search for prompt {search_text}')
+def page_generate_search(search_text):
     generate_start = time.time()
-    query = searcher.generate_review_topic(search_text)
+    print(f'generating search: "{search_text}"')
+    query = celery_generate_search(search_text)
     generate_end = time.time()
     print(f'generating the query took {generate_end - generate_start} seconds')
     st.session_state.running_generate_search = False
@@ -54,7 +50,7 @@ with st.form("search_form"):
 
     # generate a search / fill in the default form value with the old / existing one
     old_search_text = st.session_state.topic_information.get('search_text', '').strip()
-    new_search_text = st.text_area('Enter a description, e.g. a review title, for the topic you\'re interested in:', value=old_search_text).strip()
+    new_search_text = st.text_area(f'Enter a description, e.g. a review title, for "{st.session_state.topic_information["topic_name"]}":', value=old_search_text).strip()
     generate_submitted = st.form_submit_button(
         "Generate Search",
         disabled=st.session_state.get('running_generate_search', False),
@@ -63,12 +59,12 @@ with st.form("search_form"):
         st.stop()
     # resurrect the old query or generate a new one
     if generate_submitted and len(new_search_text) > 0:
-        if old_search_text == new_search_text:
+        if old_search_text == new_search_text and len(st.session_state.topic_information.get('generated_query', '')) > 0:
             query = st.session_state.topic_information['search_query']
         else:
             with st.spinner('Generating search'):
                 st.markdown('Generating the search may take a moment, now is a good time to fetch a coffee')
-                query = generate_search(new_search_text)
+                query = page_generate_search(new_search_text)
                 st.session_state.topic_information['generated_query'] = query
                 st.session_state.topic_information['search_text'] = new_search_text
         #query = '(statins [heart OR cardiovascular] AND ("impact" OR "effect" OR "benefit"))'
@@ -92,7 +88,7 @@ if len(st.session_state.topic_information.get('search_text', '')) > 0 and len(st
     cochrane_filter = SearchBot.PubmedQueryGeneratorBot.rct_filter()
     with st.form("search"):
         query = st.text_area('Search query', value=st.session_state.topic_information['search_query'])
-        if st.checkbox(f'Add Cochrane RCT filter? {cochrane_filter}', value=st.session_state.topic_information.get('used_cochrane_filter', 0) == 1):
+        if st.checkbox(f'Add Cochrane RCT filter? {escape(cochrane_filter)}', value=st.session_state.topic_information.get('used_cochrane_filter', 0) == 1):
             st.session_state.topic_information['used_cochrane_filter'] = 1
             added_filter = ' AND ' + cochrane_filter
             use_rct_filter = True
@@ -122,8 +118,9 @@ if len(st.session_state.topic_information.get('search_text', '')) > 0 and len(st
                     st.session_state.topic_information['topic_uid'],
                     persist=False,
                     run_ranker=st.session_state.topic_information['run_ranker'],
-                    fetch_all_by_date=False, # temporary, TODO reset to true
+                    fetch_all_by_date=True,
                 )
+                df.set_index('pmid', drop=True, inplace=True)
                 st.session_state.topic_information['count'] = count
                 st.session_state.topic_information['pmids'] = pmids
                 st.session_state.topic_information['article_data_df'] = article_data_df
@@ -131,16 +128,26 @@ if len(st.session_state.topic_information.get('search_text', '')) > 0 and len(st
                 st.session_state.topic_information['screening_results'] = df
                 st.session_state.topic_information['last_searched'] = st.session_state.topic_information['search_query']
                 st.session_state.topic_information['execute_search'] = False
+                if count > 0:
+                    st.markdown(f'Retrieved {count} documents')
+                else:
+                    st.markdown(f'Retrieved 0 documents, try a less restrictive search.')
 
 if st.session_state.topic_information.get('df', None) is not None:
+    st.markdown(f'Retrieved {len(st.session_state.topic_information["df"])} articles')
     if 'index' in st.session_state.topic_information['df'].columns:
         del st.session_state.topic_information['df']['index']
-    if st.button('Finalize'):
+    if st.button('Finalize search and begin screening?'):
         st.session_state.topic_information['final'] = 1
         finalize = 1
+        if 'pmid' in st.session_state.topic_information['df'].columns:
+            pmids = st.session_state.topic_information['df']['pmid']
+        else:
+            pmids = st.session_state.topic_information['df'].index.tolist()
+
         database_utils.insert_unscreened_pmids(
             topic_uid=st.session_state.topic_information['topic_uid'],
-            pmids=st.session_state.topic_information['df']['pmid'],
+            pmids=pmids,
             ranks=st.session_state.topic_information['df']['robot_ranking'] if 'robot_ranking' in st.session_state.topic_information['df'].columns else None,
         )
         database_utils.write_topic_info(
@@ -157,6 +164,7 @@ if st.session_state.topic_information.get('df', None) is not None:
         st.switch_page('pages/4-search_results_and_screening.py')
     else:
         finalize = 0
+    # TODO add button to rerun the ranker here?
     st.dataframe(
         st.session_state.topic_information['df'],
         hide_index=True,
@@ -165,6 +173,7 @@ if st.session_state.topic_information.get('df', None) is not None:
             'pmid': st.column_config.TextColumn(
                 'PMID',
                 help='pubmed ID',
+                width='small',
             ),
             # TODO should probably remove this?
             'human_decision': st.column_config.SelectboxColumn(
@@ -175,10 +184,12 @@ if st.session_state.topic_information.get('df', None) is not None:
                     'Include',
                     'Exclude'
                 ],
+                width='small',
             ),
             'robot_ranking': st.column_config.NumberColumn(
                 'AutoRank',
                 help='AutoRanker Results',
+                width='small',
             ),
             'titles': st.column_config.TextColumn(
                 'Title',

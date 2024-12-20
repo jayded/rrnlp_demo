@@ -10,7 +10,7 @@ st.title("Search Bot")
 @st.cache_resource
 def get_searcher():
     #return SearchBot.get_llama_cpp_bot()
-    search_bot = SearchBot.get_search_bot(
+    search_bot = SearchBot.get_topic_to_pubmed_converter(
         #weights=st.config['search_bot']['model_path'],
         #tokenizer=st.config['search_bot']['tokenizer'],
         device='cpu',

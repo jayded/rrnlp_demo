@@ -24,20 +24,18 @@ from rrnlp.models import get_device
 #weights_path = rrnlp.models.weights_path
 # TODO
 #weights = '/media/more_data/jay/overflow/ei_demo/base_query_model_stripped/Review_title'
-weights = '/data/ei_demo/gaelen_stuff/Review_title/'
+weights = '/home/ubuntu/rrnlp-demo/gaelen_stuff/Review_title_merged/'
 #weights = '/media/more_data/jay/overflow/ei_demo/base_query_model/Review_title/checkpoint_epoch_0006'
 #weights = '/media/more_data/jay/overflow/ei_demo/RRnlp/ckpt6_merged'
 
 #weights = '/media/more_data/jay/overflow/ei_demo/base_query_model/Review_title/checkpoint_epoch_0006'
 
-def get_search_bot(weights=weights, tokenizer='mistralai/Mistral-7B-Instruct-v0.2', device='auto'):
-    return PubmedQueryGeneratorBot(
-        weights=weights,
-        tokenizer=tokenizer,
-        device=device,
-    )
 
-def get_topic_to_pubmed_converter(weights, tokenizer, device) -> Tuple[AutoModelForCausalLM, AutoTokenizer]:
+def get_topic_to_pubmed_converter(
+        weights=weights,
+        tokenizer='mistralai/Mistral-7B-Instruct-v0.2',
+        device='auto',
+    ):
     '''
     Returns the 'punchline' extractor, which seeks out sentences that seem to convey
     main findings.
@@ -46,7 +44,6 @@ def get_topic_to_pubmed_converter(weights, tokenizer, device) -> Tuple[AutoModel
     #dtype = torch.float32
     #print('loading to', device)
     tokenizer = AutoTokenizer.from_pretrained(tokenizer)
-    os.makedirs('./offload', exist_ok=True)
     #model = AutoModelForCausalLM.from_pretrained(
     #    'mistralai/Mistral-7B-Instruct-v0.2',
     #    #is_trainable=False,
@@ -58,7 +55,7 @@ def get_topic_to_pubmed_converter(weights, tokenizer, device) -> Tuple[AutoModel
     #    weights,
     #    #offload_folder=tempfile.TemporaryDirectory().name,
     #)
-    model = AutoPeftModelForCausalLM.from_pretrained(
+    model = AutoModelForCausalLM.from_pretrained(
         weights,
         device_map='auto',
         offload_folder=tempfile.TemporaryDirectory().name,
@@ -76,7 +73,7 @@ def get_topic_to_pubmed_converter(weights, tokenizer, device) -> Tuple[AutoModel
     #).merge_and_unload()
     #model = model.to(device)
 
-    return model, tokenizer
+    return PubmedQueryGeneratorBot(model, tokenizer)
 
 
 # I'm not actually convinced that these are any faster (or substantially so) than just running a torch model.
@@ -91,7 +88,8 @@ class LlamaCppPubmedQueryGeneratorBot:
         self.llm = llm
 
     def generate_review_topic(self, review_topic: str) -> str:
-        res = self.llm(review_topic, max_tokens=500)
+        query = f'Translate the following into a boolean search query to find relevant studies in PubMed. Do not add any explanation. Do not repeat terms. Prefer shorter queries.\n{review_topic}'
+        res = self.llm(query, max_tokens=500)
         text = res['choices'][0]['text']
         text = text.replace('[/INST]', '')
         text = text.strip()
@@ -103,15 +101,11 @@ class PubmedQueryGeneratorBot:
 
     def __init__(
         self,
-        weights,
+        query_generator,
         tokenizer,
-        device='auto',
     ):
-        self.query_generator, self.tokenizer = get_topic_to_pubmed_converter(
-            weights=weights,
-            tokenizer=tokenizer,
-            device=device,
-        )
+        self.query_generator = query_generator
+        self.tokenizer = tokenizer
         self.query_generator.eval()
 
     def generate_review_topic(self, review_topic: str) -> str:
@@ -125,6 +119,8 @@ class PubmedQueryGeneratorBot:
             device=self.query_generator.device,
             return_tensors='pt'
         )
+        title_inputs = title_inputs.to(self.query_generator.device)
+        print('devices', self.query_generator.device, title_inputs.device)
         #import ipdb; ipdb.set_trace()
         titlequery = self.query_generator.generate(
             input_ids=title_inputs,
