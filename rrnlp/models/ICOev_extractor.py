@@ -83,7 +83,7 @@ class ICOBot:
                     except:
                         print(f'label parse error for {production}')
                         label = None
-                    components = ["intervention", "outcome", "comparator", "cvidence", "sentence", 'label']
+                    components = ["intervention", "outcome", "comparator", "evidence", "sentence", 'label']
                     ico_tuplet = dict(zip(components, production))
                     ico_tuplet['label'] = label
                     del ico_tuplet['sentence']
